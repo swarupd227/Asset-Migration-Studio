@@ -114,9 +114,23 @@ DB_SECRET_URI="https://${KV}.vault.azure.net/secrets/database-url"
 IMAGE="${ACR}.azurecr.io/asset-migration-studio:${TAG}"
 SECRETS=("anthropic-api-key=keyvaultref:${SECRET_URI},identityref:${IDENTITY_ID}" "database-url=keyvaultref:${DB_SECRET_URI},identityref:${IDENTITY_ID}")
 ENV_VARS=("ANTHROPIC_API_KEY=secretref:anthropic-api-key" "DATABASE_URL=secretref:database-url" "AMS_MODEL=claude-opus-5-5" "PORT=8080" "NODE_ENV=production")
+# Container Apps accepts one change at a time: wait until the app has finished the previous one.
+wait_ready() {
+  for i in $(seq 1 30); do
+    state="$(az containerapp show -g "$RG" -n "$APP" --query properties.provisioningState -o tsv 2>/dev/null)"
+    [ "$state" = "Succeeded" ] || [ "$state" = "Failed" ] && return 0
+    echo "Waiting for the app to finish its previous update ($state)..."; sleep 10
+  done
+}
 if az containerapp show -g "$RG" -n "$APP" -o none 2>/dev/null; then
+  wait_ready
   az containerapp secret set -g "$RG" -n "$APP" --secrets "${SECRETS[@]}" -o none
-  az containerapp update -g "$RG" -n "$APP" --image "$IMAGE" --set-env-vars "${ENV_VARS[@]}" --min-replicas 1 --max-replicas 3 -o none
+  for attempt in 1 2 3 4 5; do
+    wait_ready
+    if az containerapp update -g "$RG" -n "$APP" --image "$IMAGE" --set-env-vars "${ENV_VARS[@]}" --min-replicas 1 --max-replicas 3 -o none; then break; fi
+    [ "$attempt" = 5 ] && exit 1
+    echo "Update did not go through; retrying ($attempt/5)..."; sleep 15
+  done
 else
   echo "Waiting 60s for the identity's permissions to apply..."; sleep 60
   az containerapp create -g "$RG" -n "$APP" --environment "$ENV_NAME" \
