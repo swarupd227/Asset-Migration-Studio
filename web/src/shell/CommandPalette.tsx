@@ -45,14 +45,14 @@ export function CommandPalette() {
       if (s.status !== 'locked' && s.n !== 12) list.push({ id: `run-${s.n}`, group: 'Run agents', label: `Run stage ${s.n} · ${s.name}`, hint: s.summary, icon: s.n >= 8 && s.n <= 11 ? Workflow : Play, run: close(() => runStage(s.n)) });
     }
     for (const m of mappings) list.push({ id: `m-${m.id}`, group: 'Mappings', label: `${m.id} · ${m.sourceElements.join(' + ')}`, hint: `→ ${m.conceptLabel} → ${m.target}`, icon: Search, run: close(() => nav(`/review?item=${m.id}`)) });
-    for (const p of meta?.people ?? []) list.push({ id: `p-${p.id}`, group: 'Act as', label: `${p.name}`, hint: p.role, icon: UserRound, run: close(() => setPersona(p.id)) });
+    for (const p of meta?.people ?? []) list.push({ id: `p-${p.id}`, group: 'Switch user', label: `${p.name}`, hint: p.role, icon: UserRound, run: close(() => setPersona(p.id)) });
     list.push({ id: 'theme', group: 'Settings', label: 'Toggle light / dark theme', icon: Moon, run: close(toggleTheme) });
     return list;
   }, [dashboard, mappings, meta, nav, runStage, setPaletteOpen, setPersona, toggleTheme]);
 
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
-    const hits = t ? cmds.filter((c) => `${c.label} ${c.hint ?? ''} ${c.group}`.toLowerCase().includes(t)) : cmds.filter((c) => c.group !== 'Mappings' && c.group !== 'Act as');
+    const hits = t ? cmds.filter((c) => `${c.label} ${c.hint ?? ''} ${c.group}`.toLowerCase().includes(t)) : cmds.filter((c) => c.group !== 'Mappings' && c.group !== 'Switch user');
     const askCmd: Cmd[] = t ? [{ id: 'ask', group: 'Ask the Review Assistant', label: q, hint: 'Grounded in this project’s evidence', icon: Sparkles, run: () => { setPaletteOpen(false); ask(q); } }] : [];
     return [...askCmd, ...hits].slice(0, 40);
   }, [q, cmds, ask, setPaletteOpen]);

@@ -64,7 +64,15 @@ export function transform(raw: Dataset, fixes: FixProposal[], mappings: Mapping[
 
   for (const f of approved) {
     const p = f.payload ?? {};
-    if (f.kind === 'merge_duplicate') {
+    if (f.rule === 'RF-01' && f.payload?.target === 'asset') {
+      for (const r of f.records) {
+        const a = assets.get(r);
+        if (!a) continue;
+        const loc = `${a.siteid}-UNASSIGNED`;
+        if (!locations.some((l) => l.location === loc)) locations.push({ location: loc, description: 'Unassigned (data owner decision pending)', siteid: a.siteid, parent: a.siteid, type: 'OPERATING', conceptId: 'core:FunctionalLocation' });
+        a.location = loc;
+      }
+    } else if (f.kind === 'merge_duplicate') {
       const [keep, dup] = f.records;
       assets.delete(dup);
       redirect.set(dup, keep);
@@ -77,7 +85,10 @@ export function transform(raw: Dataset, fixes: FixProposal[], mappings: Mapping[
       const r = m?.readings.find((x) => x.date === p.date);
       if (r) r.value = Number(p.value);
     } else if (f.kind === 'archive') {
+      // Archived assets are not loaded; open work orders on them move to the asset's location.
+      const gone = new Map(f.records.map((r) => [r, assets.get(r)?.location]));
       for (const r of f.records) assets.delete(r);
+      workOrders = workOrders.map((w) => (w.assetnum && gone.has(w.assetnum) ? { ...w, assetnum: undefined, location: gone.get(w.assetnum) ?? w.location } : w));
     } else if (f.rule === 'SM-05') {
       for (const [num, v] of Object.entries((p.values ?? {}) as Record<string, number>)) { const a = assets.get(num); if (a) a.specs.RATINGKVA = v; }
     } else if (f.rule === 'DQ-03') {
@@ -85,14 +96,6 @@ export function transform(raw: Dataset, fixes: FixProposal[], mappings: Mapping[
     } else if (f.rule === 'RF-01' && f.payload?.target === 'workorder') {
       const set = new Set(f.records);
       workOrders = workOrders.map((w) => (set.has(w.wonum) ? { ...w, assetnum: undefined } : w));
-    } else if (f.rule === 'RF-01' && f.payload?.target === 'asset') {
-      for (const r of f.records) {
-        const a = assets.get(r);
-        if (!a) continue;
-        const loc = `${a.siteid}-UNASSIGNED`;
-        if (!locations.some((l) => l.location === loc)) locations.push({ location: loc, description: 'Unassigned (data owner decision pending)', siteid: a.siteid, parent: a.siteid, type: 'OPERATING', conceptId: 'core:FunctionalLocation' });
-        a.location = loc;
-      }
     } else if (f.rule === 'SM-02') {
       const set = new Set(f.records);
       workOrders = workOrders.map((w) => (set.has(w.wonum) ? { ...w, causecode: 'MECH' } : w));
@@ -228,7 +231,7 @@ export function proposeFixes(raw: Dataset, failures: ValidationFailure[]): FixPr
     });
   }
   const archive = by('BR-02').map((f) => f.record);
-  if (archive.length) out.push({ id: 'FX-A01', kind: 'archive', rule: 'BR-02', title: `Archive ${archive.length} assets decommissioned more than two years ago`, detail: 'They go to the source archive extract and are not loaded into IFS Cloud.', records: archive, confidence: 0.99, evidence: ['STATUS = DECOMMISSIONED', `Status date before ${twoYearsAgo()}`, 'Business rule BR-02'], status: 'proposed' });
+  if (archive.length) out.push({ id: 'FX-A01', kind: 'archive', rule: 'BR-02', title: `Archive ${archive.length} assets decommissioned more than two years ago`, detail: `They go to the source archive extract and are not loaded into IFS Cloud. ${raw.workOrders.filter((w) => w.assetnum && archive.includes(w.assetnum)).length} open work orders on them move to the asset's location.`, records: archive, confidence: 0.99, evidence: ['STATUS = DECOMMISSIONED', `Status date before ${twoYearsAgo()}`, 'Business rule BR-02'], status: 'proposed' });
   const naming = by('DQ-03').map((f) => assets.get(f.record)!);
   if (naming.length) {
     const names = Object.fromEntries(naming.map((a) => [a.assetnum, `${label(conceptOf(a))} · ${a.description.replace(/^OLD\s*-\s*/i, '')}`]));

@@ -21,8 +21,42 @@ import { answer, liveModel, type ChatTurn } from './agents/assistant.js';
 import type { CodeRule, Mapping, Person, Question } from './types.js';
 
 const app = express();
-app.use(cors());
+const production = process.env.NODE_ENV === 'production';
+app.disable('x-powered-by');
+app.set('trust proxy', 1);
+if (!production) app.use(cors());
+app.use((_req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+  });
+  if (production) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
+// One JSON line per API request: method, path, status and duration.
+app.use('/api', (req, res, next) => {
+  const t0 = performance.now();
+  res.on('finish', () => {
+    if (/^\/api\/(health|stream)/.test(req.originalUrl)) return;
+    console.log(JSON.stringify({ at: new Date().toISOString(), method: req.method, path: req.originalUrl.split('?')[0], status: res.statusCode, ms: Math.round(performance.now() - t0) }));
+  });
+  next();
+});
 app.use(express.json({ limit: '2mb' }));
+
+// Simple per-client limit for model calls: 20 requests per minute.
+const hits = new Map<string, number[]>();
+function rateLimit(req: Request, res: Response, next: NextFunction) {
+  const key = req.ip ?? 'unknown';
+  const now = Date.now();
+  const recent = (hits.get(key) ?? []).filter((t) => now - t < 60_000);
+  if (recent.length >= 20) { res.status(429).set('Retry-After', '30').json({ error: 'Too many assistant requests; try again shortly' }); return; }
+  recent.push(now);
+  hits.set(key, recent);
+  next();
+}
 
 export class HttpError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -410,7 +444,7 @@ p.get('/audit', wrap(async (req, res) => {
 p.get('/agent-events', wrap(async (req, res) => res.json(await recentEvents(pidOf(req), 200))));
 
 // Review Assistant (streams text over SSE)
-p.post('/assistant', wrap(async (req, res) => {
+p.post('/assistant', rateLimit, wrap(async (req, res) => {
   const pid = pidOf(req);
   const body = parse(z.object({
     messages: z.array(z.object({ role: z.enum(['user', 'assistant']), content: z.string().max(8000) })).min(1).max(40),
@@ -460,4 +494,13 @@ if (fs.existsSync(webDist)) {
 const port = Number(process.env.PORT ?? 8791);
 await bootstrap();
 await listen();
-app.listen(port, () => console.log(`Asset Migration Studio API on :${port} · model ${liveModel ? MODEL_LABEL : 'not configured'}`));
+const server = app.listen(port, () => console.log(`Asset Migration Studio API on :${port} · model ${liveModel ? MODEL_LABEL : 'not configured'}`));
+
+// Container platforms send SIGTERM before stopping a replica: finish in-flight requests, then close the pool.
+for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+  process.on(sig, () => {
+    console.log(`${sig} received, shutting down`);
+    server.close(() => pool.end().finally(() => process.exit(0)));
+    setTimeout(() => process.exit(1), 10_000).unref();
+  });
+}

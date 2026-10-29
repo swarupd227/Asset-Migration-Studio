@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ams
+          POSTGRES_PASSWORD: ams
+          POSTGRES_DB: ams
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U ams" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - name: API starts against PostgreSQL
+        env:
+          DATABASE_URL: postgres://ams:ams@localhost:5433/ams
+          PORT: "8080"
+          NODE_ENV: production
+        run: |
+          node server/dist/index.js &
+          for i in $(seq 1 30); do curl -sf localhost:8080/api/health && break; sleep 2; done
+          curl -sf localhost:8080/api/projects | grep -q nvwp-mx-ifs
+          curl -sf localhost:8080/api/projects/nvwp-mx-ifs/dashboard > /dev/null
+      - name: Container image builds
+        run: docker build -t asset-migration-studio:ci .

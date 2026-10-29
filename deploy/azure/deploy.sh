@@ -19,12 +19,13 @@ SUFFIX="$(az account show --query id -o tsv | tr -d '-' | cut -c1-8)"
 ACR="${ACR:-acrams${SUFFIX}}"
 # "kvap" = a vault using access policies (no Azure role assignments needed to use it).
 KV="${KV:-kvap-ams-${SUFFIX}}"
+PG="${PG:-psql-ams-${SUFFIX}}"
 
 echo "Subscription: $(az account show --query name -o tsv)"
 echo "Deploying $APP to $RG in $LOCATION (registry $ACR, key vault $KV, image tag $TAG)"
 
 # ---- Resource providers (one-off per subscription) ----
-for ns in Microsoft.App Microsoft.ContainerRegistry Microsoft.KeyVault Microsoft.OperationalInsights Microsoft.ManagedIdentity; do
+for ns in Microsoft.App Microsoft.ContainerRegistry Microsoft.KeyVault Microsoft.OperationalInsights Microsoft.ManagedIdentity Microsoft.DBforPostgreSQL; do
   az provider register --namespace "$ns" --wait >/dev/null
 done
 
@@ -85,20 +86,36 @@ LOGS_KEY="$(az monitor log-analytics workspace get-shared-keys -g "$RG" -n "$LOG
 az containerapp env show -g "$RG" -n "$ENV_NAME" -o none 2>/dev/null || \
   az containerapp env create -g "$RG" -n "$ENV_NAME" -l "$LOCATION" --logs-workspace-id "$LOGS_ID" --logs-workspace-key "$LOGS_KEY" -o none
 
+# ---- Azure Database for PostgreSQL (Flexible Server) ----
+# The connection string, with a generated password, is kept only in Key Vault.
+if ! az postgres flexible-server show -g "$RG" -n "$PG" -o none 2>/dev/null; then
+  PG_PASSWORD="$(openssl rand -base64 30 | tr -dc 'A-Za-z0-9' | cut -c1-28)Aa1"
+  echo "Creating PostgreSQL server $PG (takes 5-10 minutes)..."
+  az postgres flexible-server create -g "$RG" -n "$PG" -l "$LOCATION" \
+    --tier Burstable --sku-name Standard_B1ms --storage-size 32 --version 16 \
+    --admin-user amsadmin --admin-password "$PG_PASSWORD" \
+    --public-access 0.0.0.0 --database-name ams --yes -o none
+  az keyvault secret set --vault-name "$KV" -n database-url -o none \
+    --value "postgres://amsadmin:${PG_PASSWORD}@${PG}.postgres.database.azure.com:5432/ams?sslmode=require"
+fi
+DB_SECRET_URI="https://${KV}.vault.azure.net/secrets/database-url"
+
 # ---- The app ----
-# One replica, always on: the concept demo keeps its state in memory.
+# State lives in PostgreSQL and live events fan out through LISTEN/NOTIFY, so replicas can scale out.
 IMAGE="${ACR}.azurecr.io/asset-migration-studio:${TAG}"
+SECRETS=("anthropic-api-key=keyvaultref:${SECRET_URI},identityref:${IDENTITY_ID}" "database-url=keyvaultref:${DB_SECRET_URI},identityref:${IDENTITY_ID}")
+ENV_VARS=("ANTHROPIC_API_KEY=secretref:anthropic-api-key" "DATABASE_URL=secretref:database-url" "AMS_MODEL=claude-opus-5-5" "PORT=8080" "NODE_ENV=production")
 if az containerapp show -g "$RG" -n "$APP" -o none 2>/dev/null; then
-  az containerapp update -g "$RG" -n "$APP" --image "$IMAGE" -o none
+  az containerapp secret set -g "$RG" -n "$APP" --secrets "${SECRETS[@]}" -o none
+  az containerapp update -g "$RG" -n "$APP" --image "$IMAGE" --set-env-vars "${ENV_VARS[@]}" --min-replicas 1 --max-replicas 3 -o none
 else
   echo "Waiting 60s for the identity's permissions to apply..."; sleep 60
   az containerapp create -g "$RG" -n "$APP" --environment "$ENV_NAME" \
     --image "$IMAGE" "${REGISTRY_ARGS[@]}" \
     --user-assigned "$IDENTITY_ID" \
-    --secrets "anthropic-api-key=keyvaultref:${SECRET_URI},identityref:${IDENTITY_ID}" \
-    --env-vars "ANTHROPIC_API_KEY=secretref:anthropic-api-key" "AMS_MODEL=claude-opus-5-5" "PORT=8080" \
+    --secrets "${SECRETS[@]}" --env-vars "${ENV_VARS[@]}" \
     --ingress external --target-port 8080 \
-    --cpu 0.5 --memory 1.0Gi --min-replicas 1 --max-replicas 1 -o none
+    --cpu 0.5 --memory 1.0Gi --min-replicas 1 --max-replicas 3 -o none
 fi
 
 FQDN="$(az containerapp show -g "$RG" -n "$APP" --query properties.configuration.ingress.fqdn -o tsv)"

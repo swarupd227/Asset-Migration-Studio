@@ -49,7 +49,7 @@ function PersonaMenu() {
         {open && (
           <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.12 }}
             className="absolute right-0 top-11 z-50 w-72 rounded-xl border border-line bg-surface p-1.5 shadow-pop" role="menu">
-            <div className="px-2.5 pb-1.5 pt-1 text-[11px] text-ink-3">Act as · permissions follow the role, every action is recorded</div>
+            <div className="px-2.5 pb-1.5 pt-1 text-[11px] text-ink-3">Switch user</div>
             {meta.people.map((p) => (
               <button key={p.id} role="menuitem" onClick={() => { setPersona(p.id); setOpen(false); toast(`Acting as ${p.name} · ${p.role}`, 'info'); }}
                 className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left hover:bg-sunken">
