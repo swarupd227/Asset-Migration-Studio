@@ -83,6 +83,8 @@ export default function Connect() {
   const s1 = d.stages.find((s) => s.n === 1)!;
   const s2 = d.stages.find((s) => s.n === 2)!;
   const busy = !!d.running;
+  // Projects with a database connection read custom code; the others are loaded from extracts.
+  const fileBased = !rules?.length;
 
   return (
     <>
@@ -101,18 +103,18 @@ export default function Connect() {
           <SectionLabel right={<Badge tone={s1.status === 'done' ? 'ok' : 'neutral'} dot>{s1.status === 'done' ? 'Healthy' : s1.status}</Badge>}>Source systems</SectionLabel>
           <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
             <Card>
-              <CardHeader icon={Database} title={d.project.sourceSystems[0]} subtitle={rules?.length ? 'Oracle 19c · schema MAXIMO · database read access' : 'Loaded from flat file extracts'}
+              <CardHeader icon={Database} title={d.project.sourceSystems[0]} subtitle={fileBased ? 'Loaded from flat file extracts' : 'Oracle 19c · schema MAXIMO · database read access'}
                 right={<Badge tone="ok" icon={Lock}>Read-only</Badge>} />
               <div className="grid gap-x-6 sm:grid-cols-2">
                 <div className="divide-y divide-line">
-                  <Row k="Grants" v="SELECT only, no DML" />
-                  <Row k="Objects in scope" v={cat ? `${cat.tables.length} tables · ${cat.tables.reduce((n, t) => n + t.fields.length, 0)} profiled fields` : '—'} />
-                  <Row k="Business rules in code" v={rules ? `${rules.length} found` : '—'} />
+                  <Row k="Connection" v={fileBased ? 'Extract files' : 'Database, SELECT only'} />
+                  <Row k="Objects in scope" v={cat?.tables.length ? `${cat.tables.length} tables · ${cat.tables.reduce((n, t) => n + t.fields.length, 0)} profiled fields` : 'None yet'} />
+                  <Row k="Business rules in code" v={fileBased ? 'Needs a database connection' : `${rules!.length} found`} />
                 </div>
                 <div className="divide-y divide-line">
-                  <Row k="Credentials" v={<span className="inline-flex items-center gap-1"><KeyRound className="size-3.5 text-ok" />Azure Key Vault</span>} />
+                  <Row k="Credentials" v={fileBased ? 'None stored' : <span className="inline-flex items-center gap-1"><KeyRound className="size-3.5 text-ok" />Azure Key Vault</span>} />
                   <Row k="Last discovery" v={s2.finishedAt ? new Date(s2.finishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'} />
-                  <Row k="Delta (CDC)" v={<Badge tone="neutral">Not enabled</Badge>} />
+                  <Row k="Delta loads" v={<Badge tone="neutral">{fileBased ? 'Upload newer extracts' : 'Not enabled'}</Badge>} />
                 </div>
               </div>
             </Card>
@@ -120,9 +122,8 @@ export default function Connect() {
 
           <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
             <Card>
-              <CardHeader icon={Server} title="SAP ECC Plant Maintenance / S/4HANA Asset Management" subtitle="Data dictionary, check tables and domain values"
-                right={<Badge tone="neutral" dot>Not configured</Badge>} />
-              <Button size="sm" disabled title="Contact your administrator">Add connector</Button>
+              <CardHeader icon={Server} title="Add a source system" subtitle="A second Maximo instance, SAP ECC Plant Maintenance or S/4HANA Asset Management for this project. Database connectors are set up by your platform administrator; until then, load extracts below." />
+              <Button size="sm" disabled title="Your platform administrator sets up database connectors">Request a connector</Button>
             </Card>
           </motion.div>
 

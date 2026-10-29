@@ -5,7 +5,7 @@ import type { AuditEntry, DqSnapshot, LoadRun, Project, ReconciliationCheck } fr
 import { useApi, useApp } from '@/lib/app';
 import { api } from '@/lib/api';
 import { day, num, timeAgo } from '@/lib/format';
-import { Badge, Button, Card, CardHeader, cx, Mono, PageHeader, Segmented, Skeleton } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, cx, Empty, Mono, PageHeader, Segmented, Skeleton } from '@/components/ui';
 import { ColumnChart, downloadFile, StatusDot } from '@/components/c/charts';
 
 interface ProofData {
@@ -25,10 +25,23 @@ const outcomeTone = { pass: 'ok', fail: 'crit', explained: 'warn' } as const;
 const SIGNERS = ['Customer data owner', 'IFS solution consultant'] as const;
 
 export default function ProofPack() {
-  const { data } = useApi<ProofData>('/proofpack');
+  const { data, loading } = useApi<ProofData>('/proofpack');
   const { persona, act, runStage, dashboard, meta } = useApp();
   const [trend, setTrend] = useState<'dq' | 'failing' | 'failed'>('dq');
   const [kind, setKind] = useState<'all' | ReconciliationCheck['kind']>('all');
+  if (!data && !loading) return (
+    <>
+      <PageHeader eyebrow={<><FileCheck2 className="size-3.5" />Stage 11 · Reconcile</>} title="Proof pack" description="Lineage, reconciliation, approvals and sign-off for a dry run." />
+      <Card>
+        <Empty icon={FileCheck2} title="No dry run yet">
+          The proof pack is built from a numbered dry run. Finish the review, then start the first run from Mission control; stages 8 to 11 build, load, validate and reconcile it.
+        </Empty>
+        <div className="mt-2 flex justify-center">
+          <Button variant="agent" icon={Play} disabled={!!dashboard?.running || !!dashboard?.job || dashboard?.stages.find((s) => s.n === 8)?.status === 'locked'} onClick={() => runStage(8)}>Start Run 1</Button>
+        </div>
+      </Card>
+    </>
+  );
   if (!data) return <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-64" /><Skeleton className="h-64" /></div>;
 
   const run = data.run;

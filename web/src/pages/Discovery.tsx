@@ -11,7 +11,7 @@ import { Badge, Button, Card, CardHeader, Confidence, cx, Empty, Mono, PageHeade
 interface CatalogueData {
   tables: CatalogueTable[];
   stats: Record<string, number>;
-  badMeter: { asset: string; meter: string; readings: { date: string; value: number }[] };
+  badMeter: { asset: string; meter: string; readings: { date: string; value: number }[] } | null;
 }
 
 type Tab = 'catalogue' | 'custom' | 'rules';
@@ -255,11 +255,15 @@ export default function Discovery() {
           <Stat label="Fields profiled" icon={Gauge} value={stats.fields} sub="across in-scope tables" />
           <Stat label="Custom elements" icon={Puzzle} tone="warn" value={stats.custom} sub="marked for review" />
           <Stat label="Broken references" icon={Link2Off} tone="bad" value={stats.broken} sub="sent to validation" />
-          <Card className="h-full">
-            <div className="text-xs font-medium text-ink-3">Cumulative meter goes down</div>
-            <div className="mt-1"><MeterSpark readings={data.badMeter.readings} /></div>
-            <div className="mt-0.5 text-xs text-ink-3"><Mono className="text-[11px]">{data.badMeter.asset}</Mono> · {data.badMeter.meter} · rule SM-03</div>
-          </Card>
+          {data.badMeter ? (
+            <Card className="h-full">
+              <div className="text-xs font-medium text-ink-3">Cumulative meter goes down</div>
+              <div className="mt-1"><MeterSpark readings={data.badMeter.readings} /></div>
+              <div className="mt-0.5 text-xs text-ink-3"><Mono className="text-[11px]">{data.badMeter.asset}</Mono> · {data.badMeter.meter}</div>
+            </Card>
+          ) : (
+            <Stat label="Meter readings" icon={Gauge} value="None" sub="no meter extract loaded; meter checks run once one is" />
+          )}
         </div>
       )}
 
