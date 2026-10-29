@@ -51,6 +51,8 @@ export interface SourceAsset {
   description: string;
   siteid: string;
   location: string;
+  /** Set by the transformation when the asset's location type is not migrated (e.g. stores staging). */
+  stagedIn?: string;
   parent?: string;
   classstructure?: string; // e.g. PUMP\CENTRIFUGAL; undefined for untyped
   conceptId?: string; // ontology concept resolved from the classification

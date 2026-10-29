@@ -227,6 +227,8 @@ export async function reviewProgressNudge(pid: string) {
   const st = (await getStages(pid)).find((s) => s.n === 7);
   if (!left && st && st.status !== 'done') {
     await setStage(pid, 7, { status: 'done', finished: true });
+    // The first dry run unlocks once every element has a decision.
+    if ((await getStages(pid)).find((s) => s.n === 8)?.status === 'locked') await setStage(pid, 8, { status: 'ready' });
     await emitAgent(pid, { agent: 'orchestrator', kind: 'handoff', stage: 7, text: `Every source element has a decision. The next dry run can start.` });
   }
 }

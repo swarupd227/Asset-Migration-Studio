@@ -5,3 +5,5 @@ dist/
 .claude/scheduled_tasks.lock
 *.zip
 *.docx
+deliverables/
+demo-video/

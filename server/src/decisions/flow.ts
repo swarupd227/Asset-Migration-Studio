@@ -216,14 +216,16 @@ export async function runQuestion(pid: string, questionId: string, actor: string
     return { ...m, step: 'human', status: 'needs_review', reasoning };
   });
 
-  // Persist; a person's override is never replaced by a later run.
+  // Persist. A person's decision (accepted or overridden) is never replaced by a later run while the
+  // record's text is unchanged; an override is never replaced at all.
   for (let i = 0; i < decisions.length; i += 2000) {
     await q(
       `INSERT INTO model_decisions (project_id, id, question_id, record_kind, record_key, input_hash, step, status, confidence, answer, data)
        SELECT $1, x.id, x."questionId", x."recordKind", x."recordKey", x."inputHash", x.step, x.status, x.confidence, x.answer, x.d
        FROM jsonb_to_recordset($2::jsonb) AS x(id text, "questionId" text, "recordKind" text, "recordKey" text, "inputHash" text, step text, status text, confidence real, answer text, d jsonb)
        ON CONFLICT (project_id, id) DO UPDATE SET input_hash = EXCLUDED.input_hash, step = EXCLUDED.step, status = EXCLUDED.status, confidence = EXCLUDED.confidence, answer = EXCLUDED.answer, data = EXCLUDED.data, created_at = now()
-       WHERE model_decisions.status <> 'overridden'`,
+       WHERE model_decisions.status <> 'overridden'
+         AND (model_decisions.data->>'decidedBy' IS NULL OR model_decisions.input_hash <> EXCLUDED.input_hash)`,
       [pid, JSON.stringify(decisions.slice(i, i + 2000).map((d) => ({ ...d, d })))],
     );
   }

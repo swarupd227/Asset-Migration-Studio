@@ -70,6 +70,8 @@ export function transform(raw: Dataset, fixes: FixProposal[], mappings: Mapping[
   const assets = new Map(raw.assets.map((a) => [a.assetnum, { ...a, specs: { ...a.specs } }]));
   const skip = new Set(opts.notMigratedLocationTypes ?? []);
   const locations = raw.locations.filter((l) => !skip.has(l.type));
+  const staged = new Map(raw.locations.filter((l) => skip.has(l.type)).map((l) => [l.location, l.type]));
+  for (const a of assets.values()) if (staged.has(a.location)) a.stagedIn = `${a.location} (${staged.get(a.location)!.toLowerCase()})`;
   let workOrders = raw.workOrders.map((w) => ({ ...w }));
   let pms = raw.pms.map((p) => ({ ...p }));
   const meters = raw.meters.map((m) => ({ ...m, readings: m.readings.map((r) => ({ ...r })) }));
@@ -132,7 +134,9 @@ export function validate(ds: Dataset, dec: DecisionInputs = {}): ValidationFailu
   for (const a of ds.assets) {
     const cid = conceptOf(a);
     if (!a.description?.trim()) add({ key: a.assetnum, rule: 'ST-01', record: a.assetnum, object: 'Serial object', site: a.siteid, severity: 'error', reason: `Asset ${a.assetnum} has no description, which IFS requires.`, proposedFix: 'Use class and position as the description.' });
-    if (!locs.has(a.location)) add({ key: a.assetnum, rule: 'RF-01', record: a.assetnum, object: 'Serial object', site: a.siteid, severity: 'error', reason: `Asset ${a.assetnum} points to location ${a.location}, which is not in the extract.`, proposedFix: `Place it under ${a.siteid}-UNASSIGNED until the data owner confirms the position.` });
+    if (!locs.has(a.location)) add({ key: a.assetnum, rule: 'RF-01', record: a.assetnum, object: 'Serial object', site: a.siteid, severity: 'error',
+      reason: a.stagedIn ? `Asset ${a.assetnum} is in ${a.stagedIn}, a location type that is not migrated.` : !a.location ? `Asset ${a.assetnum} has no location.` : `Asset ${a.assetnum} points to location ${a.location}, which is not in the extract.`,
+      proposedFix: a.stagedIn ? 'Decide whether it is installed equipment or a stock item; stock items move to inventory, not the asset register.' : `Place it under ${a.siteid}-UNASSIGNED until the data owner confirms the position.` });
     if (a.parent) {
       const parent = assets.get(a.parent);
       const pc = parent && conceptOf(parent);
