@@ -18,7 +18,7 @@ interface AiAsset {
   allowedParents: (string | undefined)[];
   measurements: { parameter: string; concept: string; cumulative: boolean; lastValue: number; unit: string; lastRead: string }[];
   maintenance: { pmActions: { id: string; name: string; trigger: string }[] };
-  workHistory: { openWorkOrders: number; closedLast5Years: number; topFailureModes: { code: string; count: number }[]; meanTimeBetweenFailuresDays: number };
+  workHistory: { openWorkOrders: number; closedLast5Years?: number; topFailureModes?: { code: string; count: number }[]; meanTimeBetweenFailuresDays?: number };
   provenance: { source: string; mappings: string[]; loadRun?: string; transformation?: string };
 }
 
@@ -83,9 +83,9 @@ export default function AiReady() {
   return (
     <>
       <PageHeader
-        eyebrow={<><Sparkle className="size-3.5" /> D7 · AI-ready output</>}
-        title="What a Digital Worker receives"
-        description="Every migrated record is tagged with its ontology class and failure vocabulary, so IFS.ai, Loops Digital Workers and Resolve get consistent context from the first day. This is one asset, exactly as an agent would receive it."
+        eyebrow={<><Sparkle className="size-3.5" /> Deliver · {a.provenance.loadRun}</>}
+        title="AI-ready asset context"
+        description="Ontology-tagged asset record as delivered to IFS.ai, Loops and Resolve."
         actions={<>
           <form className="flex items-center gap-1.5" onSubmit={(e) => { e.preventDefault(); setAsset(assetInput.trim() || null); }}>
             <div className="flex h-8.5 items-center gap-1.5 rounded-lg border border-line bg-surface px-2.5 shadow-card">
@@ -94,7 +94,7 @@ export default function AiReady() {
             </div>
             <Button type="submit">Load asset</Button>
           </form>
-          <Button variant="agent" icon={Sparkles} onClick={() => ask(`How would a Loops Digital Worker use the context for asset ${a.identity.objectId}?`)}>How would an agent use this?</Button>
+          <Button variant="agent" icon={Sparkles} onClick={() => ask(`How would a Loops Digital Worker use the context for asset ${a.identity.objectId}?`)}>Ask agent</Button>
         </>}
       />
 
@@ -161,14 +161,16 @@ export default function AiReady() {
             <div className="bg-surface p-4">
               <SectionLabel>Work history</SectionLabel>
               <Row k="Open work orders" v={a.workHistory.openWorkOrders} />
-              <Row k="Closed, last 5 years" v={a.workHistory.closedLast5Years} />
-              <Row k="Mean time between failures" v={`${a.workHistory.meanTimeBetweenFailuresDays} days`} />
-              <div className="mt-1.5 flex gap-1.5">
-                {a.workHistory.topFailureModes.map((f) => <Badge key={f.code} tone="neutral"><History className="size-3" />{f.code} × {f.count}</Badge>)}
-              </div>
+              {a.workHistory.closedLast5Years !== undefined && <Row k="Closed, last 5 years" v={a.workHistory.closedLast5Years} />}
+              {a.workHistory.meanTimeBetweenFailuresDays !== undefined && <Row k="Mean time between failures" v={`${a.workHistory.meanTimeBetweenFailuresDays} days`} />}
+              {!!a.workHistory.topFailureModes?.length && (
+                <div className="mt-1.5 flex gap-1.5">
+                  {a.workHistory.topFailureModes.map((f) => <Badge key={f.code} tone="neutral"><History className="size-3" />{f.code} × {f.count}</Badge>)}
+                </div>
+              )}
             </div>
             <div className="bg-surface p-4 sm:col-span-2">
-              <SectionLabel>Provenance · every field traces back</SectionLabel>
+              <SectionLabel>Provenance</SectionLabel>
               <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
                 <Badge tone="neutral">{a.provenance.source}</Badge>
                 <span className="text-ink-4">via</span>
@@ -184,7 +186,7 @@ export default function AiReady() {
         <div className="flex min-w-0 flex-col gap-5">
           <Card pad={false} className="flex min-h-0 flex-col overflow-hidden">
             <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
-              <Segmented size="sm" value={view} onChange={setView} options={[{ id: 'jsonld', label: 'With ontology · JSON-LD' }, { id: 'raw', label: 'Without · raw Maximo row' }]} />
+              <Segmented size="sm" value={view} onChange={setView} options={[{ id: 'jsonld', label: 'JSON-LD' }, { id: 'raw', label: 'Source row' }]} />
               <div className="flex-1" />
               {view === 'jsonld' && <Button size="sm" variant="ghost" icon={copied ? Check : Copy} onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>}
             </div>
@@ -193,13 +195,13 @@ export default function AiReady() {
             ) : (
               <div className="max-h-[560px] overflow-auto">
                 <table className="w-full text-[12px]">
-                  <thead><tr className="border-b border-line text-left text-[11px] text-ink-3"><th className="px-4 py-2 font-medium">Maximo field</th><th className="px-2 py-2 font-medium">Value</th><th className="px-4 py-2 font-medium">What an agent can infer</th></tr></thead>
+                  <thead><tr className="border-b border-line text-left text-[11px] text-ink-3"><th className="px-4 py-2 font-medium">Maximo field</th><th className="px-2 py-2 font-medium">Value</th><th className="px-4 py-2 font-medium">Ontology binding</th></tr></thead>
                   <tbody>
                     {rawRow.map(([k, v]) => (
                       <tr key={k} className="border-b border-line last:border-0">
                         <td className="px-4 py-1.5 font-mono text-ink-2">{k}</td>
                         <td className="max-w-[160px] truncate px-2 py-1.5 font-mono text-ink">{v}</td>
-                        <td className="px-4 py-1.5 text-ink-4">{k.startsWith('NV_') ? 'Unknown custom field' : '—'}</td>
+                        <td className="px-4 py-1.5 text-ink-4">{k.startsWith('NV_') ? 'Unbound custom field' : '—'}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -209,7 +211,7 @@ export default function AiReady() {
           </Card>
 
           <Card>
-            <CardHeader title="Why the tags matter" subtitle="The same row, read by an agent with and without the ontology" icon={Bot} />
+            <CardHeader title="Semantic tags" subtitle="Source fields resolved to ontology meaning" icon={Bot} />
             <div className="space-y-1.5">
               {Object.entries(meaning).map(([field, m]) => (
                 <div key={field} className="grid grid-cols-[minmax(0,9rem)_auto_1fr] items-center gap-2 rounded-lg bg-surface-2 px-2.5 py-1.5 text-[12px]">
@@ -220,7 +222,7 @@ export default function AiReady() {
               ))}
             </div>
             <div className="mt-3 grid grid-cols-3 gap-2 text-center">
-              {[{ icon: Cpu, t: 'IFS.ai', d: 'Classifies and predicts with class-level context' }, { icon: Bot, t: 'Loops', d: 'Digital Workers reason with valid failure modes' }, { icon: Activity, t: 'Resolve', d: 'Field service knows what the asset is' }].map((x) => (
+              {[{ icon: Cpu, t: 'IFS.ai', d: 'Class and attributes' }, { icon: Bot, t: 'Loops', d: 'Failure modes and history' }, { icon: Activity, t: 'Resolve', d: 'Identity and placement' }].map((x) => (
                 <div key={x.t} className="rounded-lg border border-line p-2">
                   <x.icon className="mx-auto size-4 text-agent" />
                   <div className="mt-1 text-[12px] font-semibold">{x.t}</div>

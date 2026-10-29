@@ -73,7 +73,7 @@ function ConceptDetail({ c, byId, onSelect }: { c: Concept; byId: Map<string, Co
           ) : <p className="text-xs text-ink-3">No attributes on this concept.</p>}
         </Card>
         <Card>
-          <CardHeader title="Valid failure modes" subtitle="ISO 14224 style codes; failure causes are checked against them (SM-02)" />
+          <CardHeader title="Valid failure modes" subtitle="ISO 14224 codes · checked by rule SM-02" />
           {c.failureModes.length ? <ul className="space-y-1.5">{c.failureModes.map((f) => <li key={f} className="flex items-center gap-2 text-[12.5px]"><span className="size-1.5 rounded-full bg-agent" />{f}</li>)}</ul> : <p className="text-xs text-ink-3">Not applicable.</p>}
         </Card>
       </div>
@@ -97,7 +97,7 @@ function ConceptDetail({ c, byId, onSelect }: { c: Concept; byId: Map<string, Co
         <div className="grid gap-3 md:grid-cols-3">
           {([['IBM Maximo', c.bindings.maximo], ['SAP PM', c.bindings.sap], ['IFS Cloud', c.bindings.ifs]] as const).map(([sys, v]) => (
             <div key={sys} className={cx('rounded-lg border p-3', sys === 'IFS Cloud' ? 'border-accent-line bg-accent-soft/50' : 'border-line bg-surface-2')}>
-              <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-ink-3">{sys}{sys === 'IFS Cloud' && <span className="normal-case tracking-normal text-ink-4">to be confirmed</span>}</div>
+              <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-wider text-ink-3">{sys}</div>
               <div className="mt-1 text-[12.5px] text-ink-2">{v ?? '—'}</div>
             </div>
           ))}
@@ -147,7 +147,7 @@ function ConceptsTab({ data }: { data: OntologyData }) {
           </div>
         </Card>
         <Card>
-          <CardHeader title="Agent API" subtitle="Agents never get the whole ontology" icon={Sparkles} />
+          <CardHeader title="Agent API" subtitle="Operations available to agents" icon={Sparkles} />
           <ul className="space-y-2">
             {ops.map(([op, d]) => (
               <li key={op}><Mono className="text-[11.5px] font-medium text-agent">{op}()</Mono><div className="text-[11.5px] text-ink-3">{d}</div></li>
@@ -168,14 +168,14 @@ function CodesTab({ data }: { data: OntologyData }) {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
         <div>
           <h3 className="text-[13.5px] font-semibold">Work order status · concept scheme</h3>
-          <p className="text-xs text-ink-3">Each vendor value has an exact, close or broader match to the ontology value. Unmatched codes always go to a person.</p>
+          <p className="text-xs text-ink-3">Vendor values matched to ontology values as exact, close or broader. Unmatched codes are routed for review.</p>
         </div>
         <Button size="sm" variant="ghost" icon={Sparkles} onClick={() => ask('Why are NV-HOLD, FLDCOMP and PEND-REG unmatched, and who decides?')}>Ask agent</Button>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-[12.5px]">
           <thead className="text-[11px] uppercase tracking-wider text-ink-4">
-            <tr>{['Ontology status', 'Maximo', 'SAP PM', 'IFS Cloud (to be confirmed)', 'Match', 'Work orders'].map((h, i) => <th key={h} className={cx('px-4 py-2 font-medium', i === 5 && 'text-right')}>{h}</th>)}</tr>
+            <tr>{['Ontology status', 'Maximo', 'SAP PM', 'IFS Cloud', 'Match', 'Work orders'].map((h, i) => <th key={h} className={cx('px-4 py-2 font-medium', i === 5 && 'text-right')}>{h}</th>)}</tr>
           </thead>
           <tbody>
             {data.codeList.map((e, i) => (
@@ -202,7 +202,7 @@ function GovernanceTab({ data }: { data: OntologyData }) {
   return (
     <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
       <Card>
-        <CardHeader title="Proposals from projects" subtitle="Sent by the Ontology Steward, anonymised. Only the curator can accept." icon={Sparkles} />
+        <CardHeader title="Proposals from projects" subtitle="Submitted by the Ontology Steward · curator approval required" icon={Sparkles} />
         {!curator && <div className="mb-3 rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs text-ink-3">You are acting as {persona?.role ?? '…'}. Switch to Ari Cohen (Ontology curator) to accept or reject proposals.</div>}
         <ul className="space-y-3">
           {data.proposals.map((p) => (
@@ -252,10 +252,10 @@ export default function Ontology() {
   return (
     <>
       <PageHeader
-        eyebrow={<><BookOpenText className="size-3.5" />Knowledge · D1</>}
+        eyebrow={<><BookOpenText className="size-3.5" />Knowledge</>}
         title="Industrial Asset Ontology"
-        description="A curated model of what asset management data means in each industry. Agents map through meaning, not through column names, and every semantic rule comes from here."
-        badges={data && <><Badge tone="agent">{data.version}</Badge><Badge tone="accent">{data.pack}</Badge><Badge>{data.concepts.length} concepts in this slice</Badge></>}
+        description="Concepts, code lists, standards and version history for the pinned ontology."
+        badges={data && <><Badge tone="agent">{data.version}</Badge><Badge tone="accent">{data.pack}</Badge><Badge>{data.concepts.length} concepts</Badge></>}
       />
       <Tabs className="mb-5" value={tab} onChange={setTab} tabs={[
         { id: 'concepts', label: 'Concepts', count: data?.concepts.length },

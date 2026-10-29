@@ -29,9 +29,9 @@ export default function Audit() {
   return (
     <>
       <PageHeader
-        eyebrow={<><ScrollText className="size-3.5" /> AU-01 · AU-02 · AU-03</>}
+        eyebrow={<><ScrollText className="size-3.5" /> Write-once · SHA-256 chained</>}
         title="Audit log"
-        description="Every user action, agent call, approval and load is recorded with time, actor, inputs and outputs, plus the ontology and model version for agent calls."
+        description="User actions, agent calls, approvals and loads for this project."
         actions={<Button icon={Upload} onClick={exportJsonl}>Export to log store</Button>}
       />
 
@@ -42,7 +42,7 @@ export default function Audit() {
             <span className="text-[14px] font-semibold">{data.integrity.ok ? 'Hash chain verified' : `Chain broken at entry #${data.integrity.brokenAt}`}</span>
             <Badge tone="neutral" icon={Lock}>Write-once</Badge>
           </div>
-          <p className="mt-0.5 text-[12.5px] text-ink-2">Entries are append-only and each one carries the SHA-256 of the one before it. No user can change the log, administrators included. Any edit would break the chain from that point on.</p>
+          <p className="mt-0.5 text-[12.5px] text-ink-2">Append-only. Each entry carries the hash of the previous entry.</p>
         </div>
         <div className="text-right">
           <div className="text-[11px] text-ink-3">Head</div>

@@ -7,7 +7,7 @@ import type { HierarchyIssue, HierarchyNode } from '@shared/types';
 import { useApi, useApp } from '@/lib/app';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
-import { Badge, Button, Card, CardHeader, cx, Empty, Mono, PageHeader, ScriptedNote, SectionLabel, Segmented, Skeleton } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, cx, Empty, Mono, PageHeader, SectionLabel, Segmented, Skeleton } from '@/components/ui';
 import { AgentAvatar } from '@/components/agents';
 
 interface HierarchyData { tree: HierarchyNode; maximo: { locations: number; assets: number; maxDepth: number }; issues: HierarchyIssue[] }
@@ -181,18 +181,22 @@ export default function Hierarchy() {
   return (
     <div className="@container">
       <PageHeader
-        eyebrow={<><GitFork className="size-3.5" />Stage 5 · Hierarchy Agent <ScriptedNote className="ml-2" /></>}
+        eyebrow={<><GitFork className="size-3.5" />Stage 5 · {(data?.issues ?? []).filter((i) => i.status === 'open').length} open issues</>}
         title="Hierarchy"
-        description="Maximo keeps two hierarchies: locations for places and asset parents for equipment. IFS Cloud has one structure of functional and serial objects. The Hierarchy Agent rebuilds it using the ontology's allowed-parent rules."
+        description="Maximo locations and assets as IFS functional and serial objects."
         actions={<Segmented value={site} onChange={(s) => { setSite(s); setExpanded(new Set()); setHighlight(null); }} size="sm" options={(meta?.sites ?? []).map((s) => ({ id: s.id, label: s.id }))} />}
       />
 
-      <div className="mb-5 flex items-start gap-3 rounded-xl border border-agent/25 bg-agent-soft/60 px-4 py-3">
-        <AgentAvatar id="hierarchy" />
-        <div className="min-w-0 flex-1 text-[13px] leading-relaxed">
-          <div className="font-semibold text-ink">Ontology rule SM-01: a pump is never placed under a valve.</div>
-          <div className="text-ink-2">A centrifugal pump may sit under a pumping station or a process system. Never under a valve, meter or instrument. Pumps that break this rule are flagged, and the agent proposes moving them under their functional location.</div>
+      <div className="mb-5 flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-2.5">
+        <AgentAvatar id="hierarchy" size="sm" />
+        <div className="min-w-0 flex-1 text-[13px]">
+          <span className="font-mono text-[11.5px] text-ink-3">SM-01</span>
+          <span className="ml-2 font-medium text-ink">Allowed parents</span>
+          <span className="ml-2 text-ink-2">Centrifugal pump → pumping station or process system. Not under valve, meter or instrument.</span>
         </div>
+        <Badge tone={(data?.issues ?? []).some((i) => i.kind === 'wrong_parent' && i.status === 'open') ? 'crit' : 'ok'}>
+          {(data?.issues ?? []).filter((i) => i.kind === 'wrong_parent' && i.status === 'open').length} violations
+        </Badge>
         <Button size="sm" variant="ghost" icon={Sparkles} className="shrink-0 text-agent" onClick={() => ask('Why can a pump not sit under a valve?')}>Ask</Button>
       </div>
 
@@ -221,7 +225,7 @@ export default function Hierarchy() {
                   <span><b className="tabular text-ink">{num(functional)}</b> functional</span>
                   <span><b className="tabular text-ink">{num(serial)}</b> serial</span>
                 </div>
-                <div className="text-[11px] text-ink-3">depth {data.maximo.maxDepth} · names to be confirmed with IFS</div>
+                <div className="text-[11px] text-ink-3">depth {data.maximo.maxDepth}</div>
               </div>
             </Card>
           </div>

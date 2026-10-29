@@ -17,10 +17,23 @@ async function handle<T>(res: Response): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Paths are project-scoped unless they belong to the platform itself.
+let projectId: string | null = null;
+export const setApiProject = (id: string | null) => { projectId = id; };
+const GLOBAL = /^\/(meta|projects$|projects\?|ontology|health|admin)/;
+function url(path: string) {
+  if (GLOBAL.test(path) || !projectId) return `/api${path}`;
+  return `/api/projects/${encodeURIComponent(projectId)}${path}`;
+}
+
 export const api = {
-  get: <T,>(path: string) => fetch(`/api${path}`).then((r) => handle<T>(r)),
+  get: <T,>(path: string) => fetch(url(path)).then((r) => handle<T>(r)),
   post: <T,>(path: string, body: unknown = {}) =>
-    fetch(`/api${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => handle<T>(r)),
+    fetch(url(path), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => handle<T>(r)),
+  upload: <T,>(path: string, file: File, fields: Record<string, string>) => {
+    const qs = new URLSearchParams({ ...fields, filename: file.name }).toString();
+    return fetch(`${url(path)}?${qs}`, { method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file }).then((r) => handle<T>(r));
+  },
 };
 
 /** Streams the Review Assistant answer; calls onText for each chunk. */
@@ -30,7 +43,7 @@ export async function streamAssistant(
   onText: (t: string) => void,
   signal?: AbortSignal,
 ): Promise<{ live: boolean }> {
-  const res = await fetch('/api/assistant', {
+  const res = await fetch(url('/assistant'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, context }),

@@ -1,7 +1,7 @@
-import type { Person, Site, SourceAsset, SourceLocation } from '../types.js';
+import type { Person, Site, SourceAsset, SourceLocation, SourceMeter, SourcePm, SourceWorkOrder } from '../types.js';
 
-// Deterministic synthetic data shaped like a Maximo 7.6 extract for a fictional utility.
-// Every run produces the same data, so the demo is repeatable.
+// Northvale Water & Power Maximo 7.6 extract, loaded into the platform as source records on first start.
+// Generation is deterministic, so the extract is identical on every environment.
 
 export function rng(seed: number) {
   let a = seed >>> 0;
@@ -141,7 +141,7 @@ buildWaterSite(sites[2], 5);
 buildPowerSite(sites[3], 9);
 buildPowerSite(sites[4], 8);
 
-// ---- Deliberate problems (as required by the concept demo scope) ----
+// ---- Known data issues in the Northvale extract ----
 
 // 1. Untyped assets: classification missing on a set of assets (the Remediation Agent proposes a class).
 export const untypedAssets: string[] = [];
@@ -222,7 +222,14 @@ export const badMeter = (() => {
   return { asset: pump.assetnum, meter: 'RUNHRS', readings };
 })();
 
-// ---- Work orders, PMs, meters (counts and samples) ----
+// 7. Two transformer ratings entered with an extra zero (SM-05).
+export const outOfRangeRatings: string[] = [];
+for (const a of assets.filter((x) => x.conceptId === 'util:DistributionTransformer' && x.siteid === 'HARB').slice(4, 6)) {
+  a.specs.RATINGKVA = Number(a.specs.RATINGKVA) >= 1000 ? 15000 : 7500;
+  outOfRangeRatings.push(a.assetnum);
+}
+
+// ---- Work orders, PM plans, meters ----
 export const workOrderStats = {
   closed: 15020,
   open: 400,
@@ -240,20 +247,48 @@ export const workOrderStats = {
   documents: 5120,
 };
 
-export const sampleOpenWorkOrders = Array.from({ length: 12 }, (_, i) => {
-  const a = assets[50 + i * 97];
-  const status = ['APPR', 'INPRG', 'WAPPR', 'WSCH', 'NV-HOLD', 'APPR', 'FLDCOMP', 'INPRG', 'APPR', 'PEND-REG', 'WAPPR', 'APPR'][i];
+const WO_TEXT = ['Replace mechanical seal', 'Investigate vibration alarm', 'Annual inspection', 'Calibrate transmitter', 'Oil sample and DGA', 'Valve exercise', 'Lubrication route', 'Repair actuator', 'Thermography survey', 'Breaker timing test', 'Replace gasket', 'Clean strainer'];
+const LONG_TEXT = 'Investigate intermittent high vibration alarm on drive end bearing, check alignment and soft foot, report findings to reliability engineer';
+
+/** Open work orders, including local status codes, broken asset links, long descriptions and invalid failure causes. */
+export const workOrders: SourceWorkOrder[] = Array.from({ length: 400 }, (_, i) => {
+  const a = assets[(50 + i * 97) % assets.length];
+  const status = i < 38 ? 'NV-HOLD' : i < 65 ? 'FLDCOMP' : i < 80 ? 'PEND-REG' : pick(['APPR', 'APPR', 'INPRG', 'WAPPR', 'WSCH']);
+  const brokenAsset = i >= 100 && i < 122;
+  const pumpCause = a.conceptId === 'util:CentrifugalPump' && i % 9 === 0;
   return {
     wonum: `WO-${pad(88120 + i * 7, 6)}`,
-    description: ['Replace mechanical seal', 'Investigate vibration alarm', 'Annual inspection', 'Calibrate transmitter', 'Oil sample and DGA', 'Valve exercise', 'Lubrication route', 'Repair actuator', 'Thermography survey', 'Breaker timing test', 'Replace gasket', 'Clean strainer'][i],
-    assetnum: a.assetnum,
+    description: i >= 200 && i < 231 ? LONG_TEXT : WO_TEXT[i % WO_TEXT.length],
     siteid: a.siteid,
+    assetnum: brokenAsset ? `PU-0${9000 + i}` : a.assetnum,
+    location: a.location,
     status,
     worktype: pick(['PM', 'CM', 'EM']),
     wopriority: int(1, 4),
     reportdate: date(2026, 2026),
+    failurecode: a.conceptId === 'util:CentrifugalPump' ? 'PUMPS' : undefined,
+    causecode: pumpCause ? 'TAPCHG' : undefined,
   };
 });
+
+/** Preventive maintenance plans; a few use running hours as if it were a calendar unit (SM-04). */
+export const pmPlans: SourcePm[] = Array.from({ length: 300 }, (_, i) => {
+  const a = assets[(7 + i * 61) % assets.length];
+  const hours = i % 25 === 3;
+  return {
+    pmnum: `PM-${pad(200 + i, 5)}`,
+    description: hours ? 'Seal inspection by running hours' : pick(['Quarterly inspection', 'Annual service', 'Monthly lubrication', 'Six-monthly calibration']),
+    siteid: a.siteid,
+    assetnum: a.assetnum,
+    frequency: hours ? 8000 : pick([1, 3, 6, 12]),
+    frequnit: hours ? 'HOURS' : 'MONTHS',
+    jpnum: `JP-${pad(100 + (i % 160), 4)}`,
+  };
+});
+
+export const meters: SourceMeter[] = [{ assetnum: badMeter.asset, metername: badMeter.meter, cumulative: true, readings: badMeter.readings }];
+
+export const sampleOpenWorkOrders = workOrders.slice(80, 92);
 
 export function assetByNum(num: string) {
   return assets.find((a) => a.assetnum === num);

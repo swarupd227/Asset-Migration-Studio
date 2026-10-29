@@ -140,11 +140,11 @@ export default function Quality() {
   return (
     <>
       <PageHeader
-        eyebrow={<><CheckCheck className="size-3.5" /> D9 · Data improvement during migration</>}
+        eyebrow={<><CheckCheck className="size-3.5" /> {open.length} fixes awaiting approval</>}
         title="Data quality"
-        description="The migration also cleans the data: duplicates merged, hierarchies repaired, naming standards applied and untyped assets classified. The score is the share of records that pass every rule, before and after. Fixes run only after a person approves them."
+        description="Share of records passing every rule, before and after approved fixes."
         actions={<>
-          <Button icon={Sparkles} onClick={() => ask('What is blocking a higher quality score?')}>What is holding the score back?</Button>
+          <Button icon={Sparkles} onClick={() => ask('What is blocking a higher quality score?')}>Summarise blockers</Button>
           {highMerges.length > 0 && <Button variant="ok" icon={CheckCheck} onClick={() => bulk(highMerges.map((f) => f.id))}>Approve {highMerges.length} high-confidence merges</Button>}
         </>}
       />
@@ -176,7 +176,7 @@ export default function Quality() {
         <Card>
           <CardHeader title="By object" subtitle="Grey dot = before, green = after approved fixes · axis from 80%" icon={Gauge} />
           {dq.byObject.map((o) => <BeforeAfterRow key={o.object} label={o.object} sub={`${o.records.toLocaleString('en-GB')} records`} before={o.before} after={o.after} min={0.8} />)}
-          <p className="mt-2 text-xs text-ink-3">The score updates as soon as you approve a fix; the data itself changes only in the next transformation run.</p>
+          <p className="mt-2 text-xs text-ink-3">Approved fixes are applied in the next transformation run.</p>
         </Card>
       </div>
 

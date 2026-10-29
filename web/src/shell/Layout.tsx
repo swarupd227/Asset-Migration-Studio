@@ -1,8 +1,8 @@
-import { Outlet, useLocation } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { CheckCircle2, Info, XCircle } from 'lucide-react';
+import { CheckCircle2, FolderPlus, Info, XCircle } from 'lucide-react';
 import { useApp } from '@/lib/app';
-import { cx } from '@/components/ui';
+import { Button, cx, Empty, Skeleton } from '@/components/ui';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { AgentDock } from './AgentDock';
@@ -27,6 +27,20 @@ function Toasts() {
   );
 }
 
+function ProjectGate() {
+  const { projects, projectId } = useApp();
+  const loc = useLocation();
+  if (loc.pathname.startsWith('/projects')) return <Outlet />;
+  if (!projects) return <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-64" /></div>;
+  if (!projectId) return (
+    <Empty icon={FolderPlus} title="No projects yet">
+      <span className="mb-3 block">Create a project to connect a source system or upload an extract.</span>
+      <Link to="/projects/new"><Button variant="primary" icon={FolderPlus}>New project</Button></Link>
+    </Empty>
+  );
+  return <Outlet />;
+}
+
 export function Layout() {
   const loc = useLocation();
   return (
@@ -37,7 +51,7 @@ export function Layout() {
         <Topbar />
         <main id="main" className={cx('min-h-0 flex-1 overflow-y-auto')}>
           <motion.div key={loc.pathname} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.18 }} className="mx-auto max-w-[1440px] px-6 py-6 lg:px-8">
-            <Outlet />
+            <ProjectGate />
           </motion.div>
         </main>
       </div>

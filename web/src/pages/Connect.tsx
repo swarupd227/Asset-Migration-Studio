@@ -1,7 +1,57 @@
+import { useState } from 'react';
 import { motion } from 'motion/react';
+import { useNavigate } from 'react-router-dom';
 import { Clock, Database, EyeOff, FileSpreadsheet, KeyRound, Lock, Play, PlugZap, Server, ShieldCheck, Sparkles, Trash2, UploadCloud } from 'lucide-react';
-import { useApp } from '@/lib/app';
-import { Badge, Button, Card, CardHeader, cx, PageHeader, ScriptedNote, SectionLabel, Skeleton } from '@/components/ui';
+import { useApi, useApp } from '@/lib/app';
+import { api } from '@/lib/api';
+import { day, num } from '@/lib/format';
+import type { CatalogueTable, CodeRule } from '@shared/types';
+import { Badge, Button, Card, CardHeader, cx, PageHeader, SectionLabel, Skeleton } from '@/components/ui';
+
+interface Extract { id: string; filename: string; table: string; rows: number; columns: string[]; uploadedBy: string; uploadedAt: string }
+
+function ExtractUpload({ region }: { region: string }) {
+  const { persona, act } = useApp();
+  const { data: extracts } = useApi<Extract[]>('/extracts');
+  const [busy, setBusy] = useState(false);
+  const [over, setOver] = useState(false);
+  const upload = async (files: FileList | File[]) => {
+    if (!persona) return;
+    setBusy(true);
+    for (const f of Array.from(files)) {
+      await act(() => api.upload<{ table: string; rows: number; custom: string[] }>('/extracts', f, { actor: persona.id }).then((r) => r),
+        `${f.name} loaded`);
+    }
+    setBusy(false);
+  };
+  return (
+    <Card>
+      <CardHeader icon={FileSpreadsheet} title="Flat file extracts" subtitle="CSV with a header row, one file per table (ASSET.csv, LOCATIONS.csv, WORKORDER.csv, PM.csv)" />
+      <label onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
+        onDrop={(e) => { e.preventDefault(); setOver(false); if (e.dataTransfer.files.length) upload(e.dataTransfer.files); }}
+        className={cx('flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-8 text-center transition', over ? 'border-accent bg-accent-soft/50' : 'border-line-strong bg-surface-2 hover:border-accent hover:bg-accent-soft/40')}>
+        <UploadCloud className={cx('size-6', busy ? 'animate-bounce text-accent' : 'text-ink-3')} />
+        <span className="text-[13px] font-medium">{busy ? 'Uploading and profiling…' : 'Drop extract files or browse'}</span>
+        <span className="text-xs text-ink-3">Files stay in the project's isolated storage in {region}</span>
+        <input type="file" multiple accept=".csv,.txt,text/csv" className="sr-only" aria-label="Upload extract files" disabled={busy}
+          onChange={(e) => { if (e.target.files?.length) upload(e.target.files); e.target.value = ''; }} />
+      </label>
+      {!!extracts?.length && (
+        <div className="mt-3 divide-y divide-line rounded-lg border border-line">
+          {extracts.map((x) => (
+            <div key={x.id} className="flex items-center gap-3 px-3 py-2 text-[12.5px]">
+              <FileSpreadsheet className="size-4 text-ink-3" />
+              <span className="font-medium">{x.filename}</span>
+              <Badge tone="neutral">{x.table}</Badge>
+              <span className="tabular text-ink-3">{num(x.rows)} rows · {x.columns.length} columns</span>
+              <span className="ml-auto text-xs text-ink-4">{x.uploadedBy} · {day(x.uploadedAt)}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 function Row({ k, v }: { k: string; v: React.ReactNode }) {
   return (
@@ -13,7 +63,10 @@ function Row({ k, v }: { k: string; v: React.ReactNode }) {
 }
 
 export default function Connect() {
-  const { dashboard: d, runStage, toast, persona } = useApp();
+  const { dashboard: d, runStage, persona } = useApp();
+  const { data: cat } = useApi<{ tables: CatalogueTable[] }>('/catalogue');
+  const { data: rules } = useApi<CodeRule[]>('/code-rules');
+  const navigate = useNavigate();
   if (!d) return <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-64" /></div>;
   const s1 = d.stages.find((s) => s.n === 1)!;
   const s2 = d.stages.find((s) => s.n === 2)!;
@@ -24,9 +77,8 @@ export default function Connect() {
       <PageHeader
         eyebrow={<><PlugZap className="size-3.5" />Stage 1 · Connect</>}
         title="Sources and target"
-        description="Read-only access to the source systems and an IFS Cloud sandbox. Data is loaded only through IFS migration tooling and APIs, never by writing to the database."
+        description="Source connectors, extract uploads and the IFS Cloud target for this project."
         actions={<>
-          <ScriptedNote />
           <Button icon={Play} disabled={busy} onClick={() => runStage(1)}>Test connections</Button>
           <Button variant="agent" icon={Play} disabled={busy} onClick={() => runStage(2)}>Run discovery</Button>
         </>}
@@ -37,48 +89,39 @@ export default function Connect() {
           <SectionLabel right={<Badge tone={s1.status === 'done' ? 'ok' : 'neutral'} dot>{s1.status === 'done' ? 'Healthy' : s1.status}</Badge>}>Source systems</SectionLabel>
           <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
             <Card>
-              <CardHeader icon={Database} title="IBM Maximo 7.6.1.3" subtitle="Oracle 19c · schema MAXIMO · database read access"
+              <CardHeader icon={Database} title={d.project.sourceSystems[0]} subtitle={rules?.length ? 'Oracle 19c · schema MAXIMO · database read access' : 'Loaded from flat file extracts'}
                 right={<Badge tone="ok" icon={Lock}>Read-only</Badge>} />
               <div className="grid gap-x-6 sm:grid-cols-2">
                 <div className="divide-y divide-line">
                   <Row k="Grants" v="SELECT only, no DML" />
-                  <Row k="Objects in scope" v="17 tables · 412 fields" />
-                  <Row k="Custom code" v="41 scripts · 12 Java classes · 9 escalations" />
+                  <Row k="Objects in scope" v={cat ? `${cat.tables.length} tables · ${cat.tables.reduce((n, t) => n + t.fields.length, 0)} profiled fields` : '—'} />
+                  <Row k="Business rules in code" v={rules ? `${rules.length} found` : '—'} />
                 </div>
                 <div className="divide-y divide-line">
                   <Row k="Credentials" v={<span className="inline-flex items-center gap-1"><KeyRound className="size-3.5 text-ok" />Azure Key Vault</span>} />
                   <Row k="Last discovery" v={s2.finishedAt ? new Date(s2.finishedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '—'} />
-                  <Row k="Delta (CDC)" v={<Badge tone="neutral">Later release</Badge>} />
+                  <Row k="Delta (CDC)" v={<Badge tone="neutral">Not enabled</Badge>} />
                 </div>
               </div>
             </Card>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}>
-            <Card className="opacity-80">
-              <CardHeader icon={Server} title="SAP ECC Plant Maintenance / S/4HANA Asset Management" subtitle="DD02L, DD03L, check tables and DD07L domain values"
-                right={<Badge tone="neutral">Release 2</Badge>} />
-              <p className="text-xs text-ink-3">Same connector and ontology pattern. Planned for the second phase together with a second industry pack.</p>
+            <Card>
+              <CardHeader icon={Server} title="SAP ECC Plant Maintenance / S/4HANA Asset Management" subtitle="Data dictionary, check tables and domain values"
+                right={<Badge tone="neutral" dot>Not configured</Badge>} />
+              <Button size="sm" disabled title="Contact your administrator">Add connector</Button>
             </Card>
           </motion.div>
 
           <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
-            <Card>
-              <CardHeader icon={FileSpreadsheet} title="Flat file extract" subtitle="CSV, Parquet or Excel, with a manifest that names each table" />
-              <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line-strong bg-surface-2 px-6 py-8 text-center transition hover:border-accent hover:bg-accent-soft/40">
-                <UploadCloud className="size-6 text-ink-3" />
-                <span className="text-[13px] font-medium">Drop extract files and manifest.json</span>
-                <span className="text-xs text-ink-3">Files stay in the project's isolated storage in {d.project.region}</span>
-                <input type="file" multiple className="sr-only" aria-label="Upload extract files"
-                  onChange={(e) => { if (e.target.files?.length) toast(`${e.target.files.length} file(s) selected. Upload is a concept in this demo.`, 'info'); }} />
-              </label>
-            </Card>
+            <ExtractUpload region={d.project.region} />
           </motion.div>
 
           <SectionLabel>Target</SectionLabel>
           <Card>
             <CardHeader icon={ShieldCheck} title={d.project.target} subtitle="Metadata from OData projections · loads through IFS data migration tooling"
-              right={<Badge tone="accent">Works through IFS tooling</Badge>} />
+              right={<Badge tone="ok" dot>Connected</Badge>} />
             <div className="grid gap-2 sm:grid-cols-3">
               {[
                 ['Read', 'OData $metadata for 38 projections'],
@@ -91,7 +134,6 @@ export default function Connect() {
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs text-ink-3">IFS Cloud object names and the preferred load method are to be confirmed with IFS.</p>
           </Card>
         </div>
 
@@ -107,23 +149,22 @@ export default function Connect() {
               <Row k="Sign-in" v="Microsoft Entra ID" />
               <Row k="Acting as" v={persona ? `${persona.name} · ${persona.role}` : '—'} />
             </div>
-            <p className="mt-3 text-[11.5px] leading-relaxed text-ink-3">Pinning the ontology version means the same inputs, code version and ontology version always give the same output.</p>
           </Card>
 
           <Card className="relative overflow-hidden">
             <div className="pointer-events-none absolute -right-10 -top-10 size-40 rounded-full bg-agent/10 blur-2xl" />
-            <CardHeader icon={Sparkles} title="Sales preview mode" subtitle="Show a prospect their own data in IFS during the sales cycle" right={<Badge tone="agent">D10</Badge>} />
+            <CardHeader icon={Sparkles} title="Preview workspaces" subtitle="Run discovery and alignment on a prospect extract" right={<Badge tone="neutral">30-day retention</Badge>} />
             <ul className="space-y-2.5 text-[12.5px] text-ink-2">
-              <li className="flex gap-2"><Play className="mt-0.5 size-3.5 shrink-0 text-agent" />Runs stages 1–6 on an uploaded prospect extract</li>
-              <li className="flex gap-2"><Lock className="mt-0.5 size-3.5 shrink-0 text-agent" />Isolated sandbox, separate from delivery projects</li>
-              <li className="flex gap-2"><EyeOff className="mt-0.5 size-3.5 shrink-0 text-agent" />Personal data such as technician names is masked</li>
+              <li className="flex gap-2"><Play className="mt-0.5 size-3.5 shrink-0 text-agent" />Stages 1–6 on an uploaded extract</li>
+              <li className="flex gap-2"><Lock className="mt-0.5 size-3.5 shrink-0 text-agent" />Isolated from delivery projects</li>
+              <li className="flex gap-2"><EyeOff className="mt-0.5 size-3.5 shrink-0 text-agent" />Personal data masked</li>
               <li className="flex gap-2"><Trash2 className="mt-0.5 size-3.5 shrink-0 text-agent" />Deleted automatically after 30 days</li>
-              <li className="flex gap-2"><Clock className="mt-0.5 size-3.5 shrink-0 text-agent" />Assets, hierarchy and work history in the IFS model within days, plus a data quality summary</li>
+              <li className="flex gap-2"><Clock className="mt-0.5 size-3.5 shrink-0 text-agent" />Assets, hierarchy, work history and data quality summary</li>
             </ul>
             <div className="mt-3 flex flex-wrap gap-1">
               {d.stages.filter((s) => s.previewEligible).map((s) => <Badge key={s.n} tone="neutral">{s.n}. {s.name}</Badge>)}
             </div>
-            <Button variant="agent" className="mt-4 w-full" icon={Sparkles} onClick={() => toast('Preview workspaces are a concept in this demo. Run by a sales engineer, expiring in 30 days.', 'info')}>
+            <Button variant="agent" className="mt-4 w-full" icon={Sparkles} onClick={() => navigate('/projects/new?mode=preview')}>
               Create preview workspace
             </Button>
           </Card>

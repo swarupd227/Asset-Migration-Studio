@@ -5,7 +5,7 @@ import { ArrowRight, BrainCircuit, Network, Puzzle, Search, Settings2, Sparkles,
 import type { Mapping } from '@shared/types';
 import { useApi, useApp, useAssistantFocus } from '@/lib/app';
 import { pct } from '@/lib/format';
-import { Badge, Button, Card, Confidence, cx, Empty, Mono, PageHeader, PathBadge, ScriptedNote, SectionLabel, Segmented, Skeleton, Stat } from '@/components/ui';
+import { Badge, Button, Card, Confidence, cx, Empty, Mono, PageHeader, PathBadge, SectionLabel, Segmented, Skeleton, Stat } from '@/components/ui';
 import { AgentAvatar } from '@/components/agents';
 import { agentIdByName, EvidenceBar, evidenceMeta, needsConfig, PrecedentList, statusMeta } from '@/components/b/shared';
 
@@ -78,14 +78,14 @@ function SidePanel({ m, onClose }: { m: Mapping; onClose: () => void }) {
           </ul>
         </div>
         <div>
-          <SectionLabel right={<span className="text-[10.5px] text-ink-4">simulated history</span>}>Seen in earlier projects</SectionLabel>
+          <SectionLabel>Seen in previous projects</SectionLabel>
           <PrecedentList items={m.precedents} limit={3} />
         </div>
         <div className="rounded-lg bg-sunken px-3 py-2 text-[12px] text-ink-2"><b className="font-medium text-ink">Rule:</b> {m.rule}</div>
         {needsConfig(m) && (
           <div className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-[12px] text-warn">
             <Settings2 className="mt-0.5 size-3.5 shrink-0" />
-            <span>{m.targetNote ?? 'Needs IFS configuration'}. The Target Designer only proposes it; the IFS solution consultant approves.</span>
+            <span>{m.targetNote ?? 'Requires IFS configuration'} · approval by IFS solution consultant</span>
           </div>
         )}
         <div className="flex gap-2">
@@ -128,16 +128,16 @@ export default function Alignment() {
   return (
     <div className="@container">
       <PageHeader
-        eyebrow={<><Network className="size-3.5" />Stages 5–6 · Concept Aligner, Hierarchy Agent, Code List Agent, Target Designer <ScriptedNote className="ml-2" /></>}
+        eyebrow={<><Network className="size-3.5" />Stages 5–6 · {all.length} bindings</>}
         title="Ontology alignment"
-        description="Agents map through meaning, not through column names. Each Maximo element is bound to an Industrial Asset Ontology concept, and each concept to its IFS Cloud home, with evidence and a calibrated confidence."
+        description="Maximo elements bound to ontology concepts and IFS Cloud targets."
       />
 
       {!data ? <Skeleton className="h-96" /> : (
         <>
           <div className="mb-5 grid grid-cols-2 gap-3 @3xl:grid-cols-5">
             <Stat label="Bindings" value={all.length} sub={`${objects.length} Maximo objects`} icon={Network} tone="agent" />
-            <Stat label="Avg confidence" value={avg.toFixed(2)} sub="calibrated on golden datasets" icon={Target} />
+            <Stat label="Avg confidence" value={avg.toFixed(2)} sub="calibrated" icon={Target} />
             <Stat label="Backed by precedent" value={pct(withPrec / (all.length || 1), 0)} sub={`${withPrec} from mapping memory`} icon={BrainCircuit} tone="ok" />
             <Stat label="Custom elements" value={custom} sub="NV_ fields and tables" icon={Puzzle} tone="warn" />
             <Stat label="Target config needed" value={config} sub="for the IFS consultant" icon={Settings2} tone="info" />
@@ -153,7 +153,6 @@ export default function Alignment() {
               {objects.map((o) => <option key={o} value={o}>{o}</option>)}
             </select>
             <Segmented size="sm" value={view} onChange={setView} options={[{ id: 'all', label: 'All' }, { id: 'low', label: 'Low confidence < 0.75', count: all.filter((m) => m.confidence < 0.75).length }]} />
-            <span className="ml-auto text-[11px] text-ink-4">IFS Cloud names are to be confirmed with IFS</span>
           </div>
 
           <div className={cx('grid items-start gap-4', selected && '@5xl:grid-cols-[1fr_360px]')}>

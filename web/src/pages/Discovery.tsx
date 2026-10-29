@@ -6,7 +6,7 @@ import type { CatalogueField, CatalogueTable, CodeRule } from '@shared/types';
 import { useApi, useApp, useAssistantFocus } from '@/lib/app';
 import { api } from '@/lib/api';
 import { num } from '@/lib/format';
-import { Badge, Button, Card, CardHeader, Confidence, cx, Empty, Mono, PageHeader, ScriptedNote, SectionLabel, Skeleton, Stat, Tabs } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, Confidence, cx, Empty, Mono, PageHeader, SectionLabel, Skeleton, Stat, Tabs } from '@/components/ui';
 
 interface CatalogueData {
   tables: CatalogueTable[];
@@ -111,7 +111,7 @@ function CatalogueTab({ data, onRule }: { data: CatalogueData; onRule: (id: stri
               </table>
             </div>
           ) : (
-            <div className="p-4"><Empty icon={Table2} title="Profiled on statistics only">Field-level profile is summarised for this table in the concept demo.</Empty></div>
+            <div className="p-4"><Empty icon={Table2} title="Table-level profile only">Field statistics are not collected for this table.</Empty></div>
           )}
         </Card>
       </motion.div>
@@ -124,7 +124,7 @@ function CustomTab({ data }: { data: CatalogueData }) {
   const items = data.tables.flatMap((t) => (t.custom ? [{ name: t.name, kind: 'Table', desc: t.description, table: t.name, rule: undefined as string | undefined }] : t.fields.filter((f) => f.custom).map((f) => ({ name: `${t.name}.${f.name}`, kind: 'Field', desc: f.description, table: t.name, rule: f.touchedByRule }))));
   return (
     <Card pad={false}>
-      <div className="border-b border-line px-4 py-3 text-xs text-ink-3">Elements not in the Maximo standard (NV_ prefix). Each one ends with a mapping, a "not migrated" decision or an open question.</div>
+      <div className="border-b border-line px-4 py-3 text-xs text-ink-3">Fields and tables outside the Maximo standard schema.</div>
       <ul className="divide-y divide-line">
         {items.map((it, i) => (
           <motion.li key={it.name} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.03 }} className="flex items-center gap-3 px-4 py-3">
@@ -240,11 +240,10 @@ export default function Discovery() {
   return (
     <>
       <PageHeader
-        eyebrow={<><ScanSearch className="size-3.5" />Stages 2–4 · Discover, profile, read custom code</>}
+        eyebrow={<><ScanSearch className="size-3.5" />Stages 2–4{dashboard?.stages.find((s) => s.n === 4)?.finishedAt ? ` · last run ${new Date(dashboard.stages.find((s) => s.n === 4)!.finishedAt!).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : ''}</>}
         title="Discovery"
-        description="The Metadata Harvester reads Maximo's own data dictionary, the Profiler measures the data on statistics and samples, and the Code Reader finds business rules hidden in scripts and enhancements."
+        description="Source catalogue, data profile and business rules found in custom code."
         actions={<>
-          <ScriptedNote />
           <Button disabled={busy} onClick={() => runStage(3)}>Re-profile</Button>
           <Button variant="agent" icon={FileCode2} disabled={busy} onClick={() => runStage(4)}>Re-read custom code</Button>
         </>}
@@ -253,7 +252,7 @@ export default function Discovery() {
       {!data || !stats ? <Skeleton className="h-28" /> : (
         <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <Stat label="Tables in scope" icon={Table2} value={stats.tables} sub={`${data.tables.length - stats.tables} out of scope`} />
-          <Stat label="Fields profiled" icon={Gauge} value={stats.fields} sub="statistics and samples only" />
+          <Stat label="Fields profiled" icon={Gauge} value={stats.fields} sub="across in-scope tables" />
           <Stat label="Custom elements" icon={Puzzle} tone="warn" value={stats.custom} sub="marked for review" />
           <Stat label="Broken references" icon={Link2Off} tone="bad" value={stats.broken} sub="sent to validation" />
           <Card className="h-full">
@@ -275,7 +274,7 @@ export default function Discovery() {
         <div className="space-y-4">
           <div className="flex items-center gap-2 rounded-lg border border-line bg-surface-2 px-3 py-2 text-xs text-ink-2">
             <ShieldCheck className="size-4 text-ok" />
-            Read through the Astra RE Harness: customer code is read, never run. Each rule is linked to the fields it touches.
+            Analysed with the Astra RE Harness · read-only
           </div>
           {rules?.map((r) => <RuleCard key={r.id} rule={r} focused={r.id === focus} />)}
           {rules && !rules.length && <Empty icon={FileCode2} title="No hidden rules found" />}

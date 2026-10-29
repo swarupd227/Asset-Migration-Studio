@@ -15,6 +15,8 @@ import Audit from '@/pages/Audit';
 import Ontology from '@/pages/Ontology';
 import Memory from '@/pages/Memory';
 import Agents from '@/pages/Agents';
+import Projects from '@/pages/Projects';
+import NewProject from '@/pages/NewProject';
 
 export function App() {
   return (
@@ -23,6 +25,8 @@ export function App() {
         <Routes>
           <Route element={<Layout />}>
             <Route index element={<MissionControl />} />
+            <Route path="projects" element={<Projects />} />
+            <Route path="projects/new" element={<NewProject />} />
             <Route path="connect" element={<Connect />} />
             <Route path="discovery" element={<Discovery />} />
             <Route path="alignment" element={<Alignment />} />

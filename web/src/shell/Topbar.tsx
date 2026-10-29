@@ -88,14 +88,7 @@ export function Topbar() {
         <span className="flex-1 truncate text-left">Search or ask…</span>
         <Kbd>Ctrl K</Kbd>
       </button>
-      {meta && (
-        <span className={cx('hidden items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium xl:flex', meta.liveModel ? 'bg-ok-soft text-ok' : 'bg-warn-soft text-warn')}
-          title={meta.liveModel ? `Review Assistant uses ${meta.model}` : 'No ANTHROPIC_API_KEY set: assistant and agent runs are scripted'}>
-          <span className={cx('size-1.5 rounded-full', meta.liveModel ? 'bg-ok' : 'bg-warn')} />
-          {meta.liveModel ? meta.model : 'Scripted agents'}
-        </span>
-      )}
-      <button onClick={toggleTheme} className="grid size-8 place-items-center rounded-lg text-ink-3 hover:bg-sunken hover:text-ink" aria-label="Toggle theme">
+            <button onClick={toggleTheme} className="grid size-8 place-items-center rounded-lg text-ink-3 hover:bg-sunken hover:text-ink" aria-label="Toggle theme">
         {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
       </button>
       <button onClick={() => setDockOpen(!dockOpen)} className={cx('grid size-8 place-items-center rounded-lg hover:bg-sunken', dockOpen ? 'text-agent' : 'text-ink-3')} aria-label="Toggle agent panel">

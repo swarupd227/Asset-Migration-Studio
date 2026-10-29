@@ -6,7 +6,7 @@ import type { LoadRun, Rule, ValidationFailure } from '@shared/types';
 import { useApi, useApp } from '@/lib/app';
 import { api } from '@/lib/api';
 import { day } from '@/lib/format';
-import { Badge, Button, Card, CardHeader, cx, Empty, Mono, PageHeader, ScriptedNote, SectionLabel, Segmented, Skeleton } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, cx, Empty, Mono, PageHeader, SectionLabel, Segmented, Skeleton } from '@/components/ui';
 import { ColumnChart } from '@/components/c/charts';
 
 interface ValidationData { rules: Rule[]; failures: ValidationFailure[]; runs: Omit<LoadRun, 'reconciliation' | 'errors'>[] }
@@ -34,13 +34,12 @@ function PumpUnderValve({ failure, onFix }: { failure?: ValidationFailure; onFix
         <div className="p-4">
           <div className="mb-2 flex items-center gap-2">
             <Badge tone="agent">SM-01 · Semantic</Badge>
-            <span className="text-[11px] text-ink-3">Rule comes from the ontology's allowed-parent model</span>
+            <span className="text-[11px] text-ink-3">Source: ontology allowed-parent rules</span>
           </div>
-          <h3 className="text-[15px] font-semibold">A pump cannot sit under a valve</h3>
+          <h3 className="text-[15px] font-semibold">Pump placed under a valve</h3>
           <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">
-            {failure ? failure.reason : 'All pumps now sit under an allowed parent. The hierarchy passes SM-01.'}
+            {failure ? failure.reason : 'No violations. All pumps sit under an allowed parent.'}
           </p>
-          <p className="mt-2 text-xs text-ink-3">Format checks would pass this record: every field is filled and the parent exists. Only a rule that knows what a pump and a valve <i>are</i> catches it.</p>
           {failure && (
             <div className="mt-3 flex flex-wrap gap-2">
               <Button size="sm" variant="ok" icon={Check} onClick={onFix} disabled={!failure.fixId}>Approve fix</Button>
@@ -108,9 +107,9 @@ export default function Validation() {
   return (
     <>
       <PageHeader
-        eyebrow={<><ShieldAlert className="size-3.5" /> Stage 10 · Validation Agent</>}
+        eyebrow={<><ShieldAlert className="size-3.5" /> Stage 10 · {data.failures.length} findings</>}
         title="Validation"
-        description="The rule catalogue runs after every transformation and every load. Semantic rules come from the ontology, so they check meaning, not only format. Every failure is explained in plain language with a proposed fix. The Validation Agent can only report; it cannot change data."
+        description="Rule results for the latest run, with proposed fixes."
         badges={<>
           <Badge tone={errors ? 'crit' : 'ok'} icon={errors ? CircleX : ShieldCheck}>{errors} errors</Badge>
           <Badge tone="warn" icon={AlertTriangle}>{data.failures.length - errors} warnings</Badge>
@@ -118,17 +117,17 @@ export default function Validation() {
           {lastRun && <Badge tone="neutral">Last run: Run {lastRun.number} · {lastRun.transformationVersion}</Badge>}
         </>}
         actions={<>
-          <Button icon={Sparkles} onClick={() => ask('What is blocking a clean validation run?')}>What is blocking us?</Button>
-          <Button variant="agent" icon={Play} disabled={busy} onClick={() => runStage(10)}>{busy ? 'Agents working…' : `Re-run validation · Run ${nextRun}`}</Button>
+          <Button icon={Sparkles} onClick={() => ask('What is blocking a clean validation run?')}>Summarise blockers</Button>
+          <Button variant="agent" icon={Play} disabled={busy} onClick={() => runStage(10)}>{busy ? 'Running…' : `Re-run validation · Run ${nextRun}`}</Button>
         </>}
       />
 
       <div className="mb-5 grid gap-5 lg:grid-cols-[1.6fr_1fr]">
         <PumpUnderValve failure={sm01} onFix={() => sm01?.fixId && approveFix(sm01.fixId)} />
         <Card>
-          <CardHeader title="Findings per run" subtitle="Stages 9 to 11 repeat as numbered runs" right={<ScriptedNote />} />
+          <CardHeader title="Findings per run" />
           <ColumnChart data={trend} format={(v) => `${v} findings`} />
-          <p className="mt-3 text-xs text-ink-3">Current findings after approved fixes: <b className="text-ink-2 tabular">{[...byRule.values()].reduce((a, b) => a + b, 0)}</b>. They are applied in the next run.</p>
+          <p className="mt-3 text-xs text-ink-3">Open after approved fixes: <b className="text-ink-2 tabular">{[...byRule.values()].reduce((a, b) => a + b, 0)}</b> · applied in Run {nextRun}</p>
         </Card>
       </div>
 
@@ -216,7 +215,7 @@ export default function Validation() {
             </div>
           )}
           <SectionLabel>{' '}</SectionLabel>
-          <p className="text-xs text-ink-3">Failures route back automatically: mapping problems return to stage 5, code problems to stage 8, and data issues to the Remediation Agent in <Link to="/quality" className="text-accent hover:underline">Data quality</Link>.</p>
+          <p className="text-xs text-ink-3">Mapping failures return to stage 5, code failures to stage 8, data issues to <Link to="/quality" className="text-accent hover:underline">Data quality</Link>.</p>
         </div>
       </div>
     </>

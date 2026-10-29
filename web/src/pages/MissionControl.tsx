@@ -4,14 +4,14 @@ import { ArrowRight, BrainCircuit, CheckCircle2, CircleDashed, FileCode2, Gauge,
 import type { Stage } from '@shared/types';
 import { useApp } from '@/lib/app';
 import { num, pct } from '@/lib/format';
-import { Badge, Button, Card, CardHeader, cx, PageHeader, Progress, ScriptedNote, Skeleton, Stat } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, cx, PageHeader, Progress, Skeleton, Stat } from '@/components/ui';
 import { AgentAvatar, agentName } from '@/components/agents';
 
 const phases = [
-  { label: 'Understand', sub: 'Also runs in sales preview mode', range: [1, 6] },
-  { label: 'Decide', sub: 'People approve', range: [7, 7] },
-  { label: 'Build & prove', sub: 'Repeats as numbered runs', range: [8, 11] },
-  { label: 'Go live', sub: 'Sign-off, cutover, learning', range: [12, 14] },
+  { label: 'Understand', sub: 'Available in preview workspaces', range: [1, 6] },
+  { label: 'Decide', sub: '', range: [7, 7] },
+  { label: 'Build & prove', sub: 'Numbered dry runs', range: [8, 11] },
+  { label: 'Go live', sub: '', range: [12, 14] },
 ];
 
 const statusMeta: Record<Stage['status'], { label: string; icon: typeof CheckCircle2; cls: string }> = {
@@ -67,8 +67,7 @@ export default function MissionControl() {
       <PageHeader
         eyebrow={<><span className="size-1.5 rounded-full bg-warn" />{d.project.status} · created {new Date(d.project.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</>}
         title={d.project.name}
-        description="Agents analyse, map, transform and check the data through the Industrial Asset Ontology. People approve every decision that matters, and only tested code moves the data."
-        badges={<>
+                badges={<>
           <Badge tone="neutral">{d.project.sourceSystems[0]}</Badge>
           <Badge tone="neutral">→ {d.project.target}</Badge>
           <Badge tone="accent">{d.project.industryPack}</Badge>
@@ -89,9 +88,8 @@ export default function MissionControl() {
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div>
             <h2 className="text-[13.5px] font-semibold">Migration pipeline</h2>
-            <p className="text-xs text-ink-3">Fourteen stages. Build, load, validate and reconcile repeat as numbered runs until sign-off.</p>
+            <p className="text-xs text-ink-3">Stages 8 to 11 run together as a numbered dry run.</p>
           </div>
-          <ScriptedNote />
         </div>
         <div className="@container">
         <div className="grid grid-cols-1 gap-4 p-4 @[1080px]:grid-cols-[minmax(0,6fr)_minmax(0,1.1fr)_minmax(0,4fr)_minmax(0,3fr)]">
@@ -120,7 +118,7 @@ export default function MissionControl() {
               <h2 className="text-[13.5px] font-semibold">Waiting for people</h2>
               <Badge tone="warn">{d.needsYou.length}</Badge>
             </div>
-            <span className="text-xs text-ink-3">Agents propose, people decide</span>
+            <span className="text-xs text-ink-3">Assigned by role</span>
           </div>
           <ul className="divide-y divide-line">
             {d.needsYou.map((n, i) => (
@@ -136,13 +134,13 @@ export default function MissionControl() {
                 </Link>
               </motion.li>
             ))}
-            {!d.needsYou.length && <li className="px-4 py-10 text-center text-sm text-ink-3">Nothing waiting. The agents have what they need.</li>}
+            {!d.needsYou.length && <li className="px-4 py-10 text-center text-sm text-ink-3">Nothing is waiting on your team.</li>}
           </ul>
         </Card>
 
         <div className="grid gap-5 sm:grid-cols-2">
           <Card className="sm:col-span-2">
-            <CardHeader title="Review routing" subtitle="Calibrated confidence decides who reviews what" icon={Gauge} right={<span className="text-xs text-ink-3 tabular">{decided}/{k.sourceElements} decided</span>} />
+            <CardHeader title="Review routing" subtitle="Routing by calibrated confidence" icon={Gauge} right={<span className="text-xs text-ink-3 tabular">{decided}/{k.sourceElements} decided</span>} />
             <div className="flex h-3 overflow-hidden rounded-full">
               {[
                 { n: k.autoAccepted, c: 'bg-ok', l: 'Auto ≥ 0.95' },
@@ -186,9 +184,9 @@ export default function MissionControl() {
         <div className="flex items-center justify-between border-b border-line px-4 py-3">
           <div>
             <h2 className="text-[13.5px] font-semibold">Agent team</h2>
-            <p className="text-xs text-ink-3">Fourteen agents with written roles, fixed tools and their own test suites</p>
+            <p className="text-xs text-ink-3">{meta.agents.length} agents · live status</p>
           </div>
-          <Link to="/agents" className="text-xs font-medium text-accent hover:underline">Guardrails & evals →</Link>
+          <Link to="/agents" className="text-xs font-medium text-accent hover:underline">Agents & evals →</Link>
         </div>
         <div className="grid gap-px bg-line" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))' }}>
           {meta.agents.map((a) => {

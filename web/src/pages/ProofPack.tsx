@@ -5,7 +5,7 @@ import type { AuditEntry, DqSnapshot, LoadRun, Project, ReconciliationCheck } fr
 import { useApi, useApp } from '@/lib/app';
 import { api } from '@/lib/api';
 import { day, num, timeAgo } from '@/lib/format';
-import { Badge, Button, Card, CardHeader, cx, Mono, PageHeader, ScriptedNote, Segmented, Skeleton } from '@/components/ui';
+import { Badge, Button, Card, CardHeader, cx, Mono, PageHeader, Segmented, Skeleton } from '@/components/ui';
 import { ColumnChart, downloadFile, StatusDot } from '@/components/c/charts';
 
 interface ProofData {
@@ -50,9 +50,9 @@ export default function ProofPack() {
   return (
     <>
       <PageHeader
-        eyebrow={<><FileCheck2 className="size-3.5" /> Stages 11–12 · D8 audit-grade proof pack</>}
+        eyebrow={<><FileCheck2 className="size-3.5" /> Stages 11–12 · {runSigs.length === 2 ? 'Signed' : 'Awaiting signature'}</>}
         title={`Proof pack · ${run.id}`}
-        description="Field-level lineage, every approval, validation and reconciliation results, and the signatures of the customer data owner and the IFS consultant. Exported as a PDF and as data."
+        description="Lineage, approvals, validation and reconciliation for the latest run."
         badges={<>
           <Badge tone="neutral">{run.transformationVersion}</Badge>
           <Badge tone="agent">{run.ontologyVersion}</Badge>
@@ -62,7 +62,7 @@ export default function ProofPack() {
         actions={<div className="no-print flex flex-wrap gap-2">
           <Button icon={FileDown} onClick={() => downloadFile(`proof-pack-${run.id}.json`, JSON.stringify(data, null, 2))}>Download as data</Button>
           <Button icon={Download} onClick={() => window.print()}>Export PDF</Button>
-          <Button variant="agent" icon={Play} disabled={busy} onClick={() => runStage(8)}>{busy ? 'Agents working…' : `Start Run ${run.number + 1}`}</Button>
+          <Button variant="agent" icon={Play} disabled={busy} onClick={() => runStage(8)}>{busy ? 'Running…' : `Start Run ${run.number + 1}`}</Button>
         </div>}
       />
 
@@ -71,14 +71,14 @@ export default function ProofPack() {
         <div className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
           <PenLine className="size-4 text-accent" />
           <h2 className="text-[13.5px] font-semibold">Sign-off</h2>
-          <span className="text-xs text-ink-3">Both signatures are recorded in the audit log and unlock delta loads and cutover</span>
-          <div className="ml-auto"><ScriptedNote /></div>
+          <span className="text-xs text-ink-3">Required: customer data owner and IFS solution consultant</span>
+          <div className="ml-auto"><Badge tone={runSigs.length === 2 ? 'ok' : 'warn'} dot>{runSigs.length === 2 ? 'Signed' : `Awaiting signature · ${runSigs.length}/2`}</Badge></div>
         </div>
         <div className="grid gap-px bg-line md:grid-cols-2">
           {SIGNERS.map((role) => {
             const sig = runSigs.find((s) => s.role === role);
             const isMe = persona?.role === role;
-            const reason = failing.length ? `Run ${run.number} has ${failing.length} failing reconciliation checks` : !isMe ? `Act as the ${role.toLowerCase()} to sign` : '';
+            const reason = failing.length ? `Run ${run.number} has ${failing.length} failing reconciliation checks` : !isMe ? `Signature restricted to the ${role.toLowerCase()}` : '';
             const who = meta?.people.find((p) => p.role === role);
             return (
               <div key={role} className="bg-surface p-4">
@@ -93,7 +93,7 @@ export default function ProofPack() {
                       </motion.div>
                     ) : (
                       <>
-                        <div className="mt-0.5 text-[13px] text-ink-2">{who?.name ?? '—'} · not signed</div>
+                        <div className="mt-0.5 text-[13px] text-ink-2">{who?.name ?? '—'} · awaiting signature</div>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           <Button size="sm" variant="primary" icon={PenLine} disabled={!!reason} onClick={sign}>Sign proof pack</Button>
                           {reason && <span className="flex items-center gap-1 text-[11.5px] text-ink-3"><Lock className="size-3" />{reason}</span>}
@@ -106,12 +106,11 @@ export default function ProofPack() {
             );
           })}
         </div>
-        {!canSignRole && !failing.length && runSigs.length < 2 && <div className="border-t border-line px-4 py-2 text-xs text-ink-3">Switch persona in the top right to Tom Hughes or Lena Svensson to sign.</div>}
       </Card>
 
       <div className="mb-5 grid gap-5 lg:grid-cols-[1fr_1.3fr]">
         <Card>
-          <CardHeader title="Run comparison" subtitle="Each dry run uses versioned code and the pinned ontology" />
+          <CardHeader title="Run comparison" subtitle="Dry runs, versioned code, pinned ontology" />
           <div className="mb-3"><Segmented size="sm" value={trend} onChange={setTrend} options={[{ id: 'dq', label: 'Quality score' }, { id: 'failing', label: 'Failing checks' }, { id: 'failed', label: 'Load errors' }]} /></div>
           <ColumnChart data={trendData} format={fmt} color={trend === 'dq' ? 'var(--ok)' : 'var(--accent)'} />
           <table className="mt-4 w-full text-[12px]">
@@ -157,7 +156,7 @@ export default function ProofPack() {
 
       {/* Lineage */}
       <Card className="mb-5">
-        <CardHeader title="Field-level lineage" subtitle="Every IFS value traces to its source field, ontology concept, approved mapping and the exact transformation version" icon={Link2} />
+        <CardHeader title="Field-level lineage" subtitle="Source field → concept → mapping → transformation → IFS target" icon={Link2} />
         <div className="space-y-2">
           {data.lineage.map((l) => (
             <div key={l.mapping} className="flex flex-wrap items-center gap-1.5 rounded-lg bg-surface-2 p-2">
@@ -187,7 +186,7 @@ export default function ProofPack() {
           <div className="flex items-center gap-2 border-b border-line px-4 py-3">
             <h2 className="text-[13.5px] font-semibold">Approvals</h2>
             <Badge tone="neutral">{data.approvals.length}</Badge>
-            <span className="text-xs text-ink-3">Every decision by a named person</span>
+            <span className="text-xs text-ink-3">Decisions by named reviewers</span>
           </div>
           <div className="max-h-[360px] overflow-y-auto">
             <table className="w-full text-[12px]">

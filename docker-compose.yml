@@ -1,0 +1,18 @@
+# Local development database: `docker compose up -d db`, then `npm run dev`.
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ams
+      POSTGRES_PASSWORD: ams
+      POSTGRES_DB: ams
+    ports:
+      - "5433:5432"
+    volumes:
+      - ams-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ams"]
+      interval: 5s
+      retries: 10
+volumes:
+  ams-db:

@@ -53,7 +53,7 @@ export interface SourceAsset {
   location: string;
   parent?: string;
   classstructure?: string; // e.g. PUMP\CENTRIFUGAL; undefined for untyped
-  conceptId?: string; // ground-truth ontology concept (demo only)
+  conceptId?: string; // ontology concept resolved from the classification
   manufacturer?: string;
   model?: string;
   serialnum?: string;
@@ -62,6 +62,45 @@ export interface SourceAsset {
   installDate: string;
   criticality: number; // NV_CRITCODE 1..5
   specs: Record<string, string | number>;
+}
+
+export interface SourceWorkOrder {
+  wonum: string;
+  description: string;
+  siteid: string;
+  assetnum?: string;
+  location?: string;
+  status: string;
+  worktype: string;
+  wopriority: number;
+  reportdate: string;
+  failurecode?: string;
+  causecode?: string;
+}
+
+export interface SourcePm {
+  pmnum: string;
+  description: string;
+  siteid: string;
+  assetnum: string;
+  frequency: number;
+  frequnit: 'DAYS' | 'WEEKS' | 'MONTHS' | 'YEARS' | 'HOURS';
+  jpnum?: string;
+}
+
+export interface SourceMeter {
+  assetnum: string;
+  metername: string;
+  cumulative: boolean;
+  readings: { date: string; value: number }[];
+}
+
+export interface Dataset {
+  assets: SourceAsset[];
+  locations: SourceLocation[];
+  workOrders: SourceWorkOrder[];
+  pms: SourcePm[];
+  meters: SourceMeter[];
 }
 
 export interface SourceLocation {
@@ -263,6 +302,8 @@ export interface FixProposal {
   status: 'proposed' | 'approved' | 'rejected';
   rule: string;
   diff?: { field: string; from: string; to: string }[];
+  /** What the transformation does when the fix is approved (e.g. a new parent, class or value). */
+  payload?: Record<string, unknown>;
 }
 
 export interface LoadRun {

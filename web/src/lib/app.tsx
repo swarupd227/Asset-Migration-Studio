@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { AgentDef, AgentEvent, Dashboard, Person, Rule, Site } from '@shared/types';
-import { api, ApiError } from './api';
+import type { AgentDef, AgentEvent, Dashboard, Person, Project, Rule, Site } from '@shared/types';
+import { api, ApiError, setApiProject } from './api';
 
 export interface Meta {
   agents: AgentDef[];
@@ -13,11 +13,16 @@ export interface Meta {
   industryPack: string;
 }
 
-export type DashboardData = Dashboard & { running: number | null; version: number };
+export type DashboardData = Dashboard & { running: number | null };
+export type ProjectSummary = Project & { stagesDone: number; pendingReview: number; records: number };
 
 interface Toast { id: number; kind: 'ok' | 'error' | 'info'; text: string }
 
 interface AppState {
+  projects: ProjectSummary[] | null;
+  projectId: string | null;
+  setProjectId: (id: string) => void;
+  reloadProjects: () => Promise<ProjectSummary[]>;
   meta: Meta | null;
   dashboard: DashboardData | null;
   version: number;
@@ -47,6 +52,8 @@ interface AppState {
 const Ctx = createContext<AppState | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
+  const [projectId, setProjectIdState] = useState<string | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [dashboard, setDashboard] = useState<DashboardData | null>(null);
   const [version, setVersion] = useState(0);
@@ -72,21 +79,47 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4200);
   }, []);
 
+  const reloadProjects = useCallback(async () => {
+    const list = await api.get<ProjectSummary[]>('/projects');
+    setProjects(list);
+    return list;
+  }, []);
+
+  // Pick the remembered project, or the first one the user can see.
+  useEffect(() => {
+    reloadProjects().then((list) => {
+      const saved = localStorage.getItem('ams-project');
+      const id = list.find((p) => p.id === saved)?.id ?? list[0]?.id ?? null;
+      setApiProject(id);
+      setProjectIdState(id);
+    }).catch(() => toast('Cannot reach the API. Is the server running on :8791?', 'error'));
+  }, [reloadProjects, toast]);
+
+  const setProjectId = useCallback((id: string) => {
+    localStorage.setItem('ams-project', id);
+    setApiProject(id);
+    setDashboard(null);
+    setEvents([]);
+    setProjectIdState(id);
+  }, []);
+
   const loadMeta = useCallback(() => {
-    api.get<Meta>('/meta').then(setMeta).catch(() => toast('Cannot reach the API. Is the server running on :8791?', 'error'));
-  }, [toast]);
+    api.get<Meta>(`/meta${projectId ? `?project=${encodeURIComponent(projectId)}` : ''}`).then(setMeta).catch(() => {});
+  }, [projectId]);
   useEffect(loadMeta, [loadMeta]);
 
   useEffect(() => {
+    if (!projectId) return;
     api.get<DashboardData>('/dashboard').then(setDashboard).catch(() => {});
-  }, [version]);
+  }, [version, projectId]);
 
   // Live stream of agent activity and state changes.
   useEffect(() => {
+    if (!projectId) return;
     let es: EventSource | null = null;
     let retry: number | undefined;
     const connect = () => {
-      es = new EventSource('/api/stream');
+      es = new EventSource(`/api/stream?project=${encodeURIComponent(projectId)}`);
       // `version` is a local counter: it bumps on every server change and on every (re)connect,
       // so views refetch even after the API restarts and its own version starts again at 1.
       es.addEventListener('hello', (e) => {
@@ -112,7 +145,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
     connect();
     return () => { es?.close(); clearTimeout(retry); };
-  }, [toast, loadMeta]);
+  }, [toast, loadMeta, projectId]);
 
   const persona = meta?.people.find((p) => p.id === personaId) ?? null;
   const setPersona = useCallback((id: string) => { setPersonaId(id); localStorage.setItem('ams-persona', id); }, []);
@@ -152,10 +185,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const value = useMemo<AppState>(() => ({
+    projects, projectId, setProjectId, reloadProjects,
     meta, dashboard, version, events, activeAgents, persona, setPersona, dockOpen, setDockOpen, dockTab, setDockTab,
     assistantContext, setAssistantContext, ask, pendingQuestion, consumeQuestion: () => setPendingQuestion(null),
     paletteOpen, setPaletteOpen, toast, toasts, runStage, act, theme, toggleTheme,
-  }), [meta, dashboard, version, events, activeAgents, persona, setPersona, dockOpen, setDockOpen, dockTab, assistantContext, ask, pendingQuestion, paletteOpen, toast, toasts, runStage, act, theme, toggleTheme]);
+  }), [projects, projectId, setProjectId, reloadProjects, meta, dashboard, version, events, activeAgents, persona, setPersona, dockOpen, setDockOpen, dockTab, assistantContext, ask, pendingQuestion, paletteOpen, toast, toasts, runStage, act, theme, toggleTheme]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -168,7 +202,7 @@ export function useApp() {
 
 /** Fetches a resource and refetches whenever server state changes (via the live stream). */
 export function useApi<T>(path: string | null): { data: T | undefined; loading: boolean; reload: () => void } {
-  const { version } = useApp();
+  const { version, projectId } = useApp();
   const [data, setData] = useState<T>();
   const [loading, setLoading] = useState(true);
   const [nonce, setNonce] = useState(0);
@@ -177,7 +211,7 @@ export function useApi<T>(path: string | null): { data: T | undefined; loading: 
     let alive = true;
     api.get<T>(path).then((d) => { if (alive) { setData(d); setLoading(false); } }).catch(() => alive && setLoading(false));
     return () => { alive = false; };
-  }, [path, version, nonce]);
+  }, [path, version, nonce, projectId]);
   return { data, loading, reload: () => setNonce((n) => n + 1) };
 }
 

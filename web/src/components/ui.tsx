@@ -196,12 +196,3 @@ export function SectionLabel({ children, right }: { children: ReactNode; right?:
     </div>
   );
 }
-
-/** Small scripted-agent disclosure, required when scripted results are shown. */
-export function ScriptedNote({ className }: { className?: string }) {
-  return (
-    <span className={cx('inline-flex items-center gap-1 text-[11px] text-ink-3', className)} title="The concept demo uses scripted agent results where a live agent run is not ready.">
-      <span className="size-1.5 rounded-full bg-warn" /> Scripted agent run
-    </span>
-  );
-}

@@ -37,25 +37,25 @@ export default function Memory() {
   return (
     <>
       <PageHeader
-        eyebrow={<><BrainCircuit className="size-3.5" />Knowledge · D2</>}
+        eyebrow={<><BrainCircuit className="size-3.5" />Knowledge</>}
         title="Mapping memory"
-        description="Every approved mapping, rejected mapping and reviewer note is kept as a precedent. Each project makes the next one more accurate, and agents show which precedents they used for every proposal."
+        description="Approved and rejected mappings stored as precedents for future proposals."
         badges={data && <Badge tone={data.sharedLearning ? 'ok' : 'neutral'} icon={Lock}>Shared learning {data.sharedLearning ? 'on' : 'off for this contract'}</Badge>}
         actions={<Button icon={Sparkles} onClick={() => ask('How does the mapping memory change confidence for a proposal?')}>Ask agent</Button>}
       />
       {!data ? <Skeleton className="h-96" /> : (
         <>
           <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            <Stat label="Proposals from precedents" icon={BrainCircuit} tone="agent" value={pct(data.fromPrecedent / data.total, 0)} sub={`${data.fromPrecedent} of ${data.total} proposals (ML-04)`} />
+            <Stat label="Proposals from precedents" icon={BrainCircuit} tone="agent" value={pct(data.fromPrecedent / data.total, 0)} sub={`${data.fromPrecedent} of ${data.total} proposals`} />
             <Stat label="Precedents used" icon={Sparkles} value={data.precedents.length} sub="cited in this project's proposals" />
             <Stat label="Contributing projects" icon={Users} value={projects} sub="anonymised" />
-            <Stat label="Tenant decisions stored" icon={Building2} tone="accent" value={data.tenantDecisions} sub="this customer only (ML-01)" />
+            <Stat label="Tenant decisions stored" icon={Building2} tone="accent" value={data.tenantDecisions} sub="this customer only" />
           </div>
 
           <Card className="mb-5" pad={false}>
             <div className="border-b border-line px-4 py-3">
               <h2 className="text-[13.5px] font-semibold">Privacy model</h2>
-              <p className="text-xs text-ink-3">Two levels: a private memory for each customer, and a shared memory that holds only anonymised patterns.</p>
+              <p className="text-xs text-ink-3">Tenant memory is private. Shared memory holds anonymised patterns only.</p>
             </div>
             <div className="grid gap-px bg-line md:grid-cols-3">
               {privacy.map((col, i) => (
@@ -73,7 +73,7 @@ export default function Memory() {
           </Card>
 
           <Card pad={false}>
-            <div className="px-4 pt-4"><CardHeader title="Precedents cited by this project" subtitle="Simulated history from earlier projects, anonymised" /></div>
+            <div className="px-4 pt-4"><CardHeader title="Precedents cited by this project" subtitle="From earlier projects, anonymised" /></div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-[12.5px]">
                 <thead className="text-[11px] uppercase tracking-wider text-ink-4">

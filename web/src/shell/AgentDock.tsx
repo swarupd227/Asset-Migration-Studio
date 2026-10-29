@@ -68,7 +68,7 @@ function Activity() {
           <div className="grid h-full place-items-center px-8 text-center text-xs text-ink-3">
             <div>
               <Radio className="mx-auto mb-2 size-5 text-ink-4" />
-              Agent activity streams here. Run a stage from Mission control to watch the agents work.
+              No agent activity yet. Runs started from Mission control appear here.
             </div>
           </div>
         ) : (
@@ -77,7 +77,7 @@ function Activity() {
         <div ref={end} />
       </div>
       <div className="border-t border-line px-3 py-2 text-[10.5px] leading-relaxed text-ink-4">
-        Every agent call is logged with inputs, outputs, ontology version and model version. Text inside source data is treated as data, never as an instruction.
+        All agent calls are logged to the audit trail.
       </div>
     </div>
   );
@@ -144,7 +144,7 @@ function Ask() {
           <div className="pt-6 text-center">
             <div className="mx-auto mb-3 grid size-11 place-items-center rounded-2xl bg-gradient-to-br from-agent to-accent text-white shadow-pop"><Sparkles className="size-5" /></div>
             <div className="text-sm font-semibold">Review Assistant</div>
-            <p className="mx-auto mt-1 max-w-[260px] text-xs leading-relaxed text-ink-3">Explains evidence, compares alternatives and drafts decision notes. It cannot approve anything: people decide.</p>
+            <p className="mx-auto mt-1 max-w-[260px] text-xs leading-relaxed text-ink-3">Ask about mappings, evidence, rules or the data. Answers cite this project.</p>
           </div>
         )}
         {msgs.map((m, i) => (
@@ -178,7 +178,7 @@ function Ask() {
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
             placeholder="Ask about a mapping, a rule or the data…" className="block w-full resize-none bg-transparent px-3 py-2 text-[13px] outline-none placeholder:text-ink-4" />
           <div className="flex items-center justify-between px-2.5 pb-2">
-            <span className="text-[10.5px] text-ink-4">{meta?.liveModel ? meta.model : 'Scripted · grounded in project data'}</span>
+            <span className="text-[10.5px] text-ink-4">{meta?.model ?? ''}</span>
             {busy ? (
               <button onClick={() => abort.current?.abort()} className="grid size-7 place-items-center rounded-lg bg-ink text-surface" aria-label="Stop"><Square className="size-3" /></button>
             ) : (

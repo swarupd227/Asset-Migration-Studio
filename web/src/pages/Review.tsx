@@ -9,7 +9,7 @@ import { useApi, useApp, useAssistantFocus } from '@/lib/app';
 import { api } from '@/lib/api';
 import { pct } from '@/lib/format';
 import {
-  Badge, Button, Card, Confidence, cx, Empty, Kbd, Mono, PageHeader, PathBadge, Progress, ScriptedNote, SectionLabel, Segmented, Skeleton, Tabs,
+  Badge, Button, Card, Confidence, cx, Empty, Kbd, Mono, PageHeader, PathBadge, Progress, SectionLabel, Segmented, Skeleton, Tabs,
 } from '@/components/ui';
 import { AgentAvatar, PersonAvatar } from '@/components/agents';
 import { agentIdByName, EvidenceBar, evidenceMeta, FlowNodes, isPending, PrecedentList, statusMeta } from '@/components/b/shared';
@@ -129,7 +129,7 @@ function DecisionPanel({ m, mode, setMode, onDone }: { m: Mapping; mode: Mode; s
         <Button variant="danger" icon={X} kbd="R" onClick={() => setMode('reject')}>Reject</Button>
         <Button variant="ghost" icon={Ban} kbd="N" onClick={() => setMode('not_migrated')}>Not migrated</Button>
         <div className="ml-auto flex items-center gap-2 text-[11px] text-ink-3">
-          {persona && <><PersonAvatar initials={persona.initials} size="sm" /><span className="hidden sm:inline">Acting as <b className="font-medium text-ink-2">{persona.name}</b> · {persona.role}</span></>}
+          {persona && <><PersonAvatar initials={persona.initials} size="sm" /><span className="hidden sm:inline">Signed in as <b className="font-medium text-ink-2">{persona.name}</b> · {persona.role}</span></>}
         </div>
       </div>
     </div>
@@ -146,7 +146,7 @@ function Detail({ m, mode, setMode, onDone }: { m: Mapping; mode: Mode; setMode:
       {m.path === 'named' && isPending(m) && (
         <div className="flex items-start gap-2.5 rounded-xl border border-crit/30 bg-crit-soft px-3.5 py-2.5 text-[12.5px] text-crit">
           <ShieldAlert className="mt-0.5 size-4 shrink-0" />
-          <div><b className="font-semibold">{m.safetyCritical ? 'Safety-critical' : 'Regulatory'}: needs a named reviewer, whatever the confidence.</b> Approval requires a note and a data expert, data owner or IFS consultant.</div>
+          <div><b className="font-semibold">{m.safetyCritical ? 'Safety-critical' : 'Regulatory'} · named reviewer required.</b> Add a note to approve. Allowed roles: data expert, data owner, IFS consultant.</div>
         </div>
       )}
       {m.status === 'question' && (
@@ -158,7 +158,7 @@ function Detail({ m, mode, setMode, onDone }: { m: Mapping; mode: Mode; setMode:
       {m.path === 'auto' && isPending(m) && (
         <div className="flex items-start gap-2.5 rounded-xl border border-ok/30 bg-ok-soft px-3.5 py-2.5 text-[12.5px] text-ok">
           <Layers className="mt-0.5 size-4 shrink-0" />
-          <div>Accepted automatically at ≥ 0.95. It is in the <b className="font-semibold">random 10% sample</b> a person still checks.</div>
+          <div>Auto-accepted at ≥ 0.95 · <b className="font-semibold">selected for spot check</b></div>
         </div>
       )}
 
@@ -175,8 +175,8 @@ function Detail({ m, mode, setMode, onDone }: { m: Mapping; mode: Mode; setMode:
           </div>
         </div>
         <FlowNodes m={m} />
-        {(m.targetNote || m.target !== 'Not migrated') && (
-          <p className="mt-2 text-[11px] text-ink-4">{m.targetNote ? `${m.targetNote}. ` : ''}IFS Cloud object names are based on public material and are to be confirmed with IFS.</p>
+        {m.targetNote && (
+          <div className="mt-2"><Badge tone="warn">{m.targetNote.replace(/^Requires IFS configuration:\s*/i, 'Requires ')}</Badge></div>
         )}
         <div className="mt-4 rounded-lg bg-sunken px-3 py-2.5">
           <div className="text-[10.5px] font-semibold uppercase tracking-wider text-ink-4">Transformation rule</div>
@@ -323,8 +323,8 @@ function Questions({ questions }: { questions: Question[] }) {
               <p className="text-[14px] font-medium leading-relaxed text-ink">{q.text}</p>
               {!isMe && who && (
                 <div className="mt-2 flex items-center gap-2 rounded-lg bg-warn-soft px-2.5 py-1.5 text-[12px] text-warn">
-                  <AlertTriangle className="size-3.5" /> This is {who.name}'s decision.
-                  <button className="font-semibold underline underline-offset-2" onClick={() => setPersona(who.id)}>Act as {who.name}</button>
+                  <AlertTriangle className="size-3.5" /> Assigned to {who.name} · {who.role}
+                  <button className="font-semibold underline underline-offset-2" onClick={() => setPersona(who.id)}>Switch user</button>
                 </div>
               )}
               <div className="mt-3 flex flex-wrap gap-2">
@@ -441,9 +441,9 @@ export default function Review() {
   return (
     <div className="@container">
       <PageHeader
-        eyebrow={<><Inbox className="size-3.5" />Stage 7 · Review workbench <ScriptedNote className="ml-2" /></>}
+        eyebrow={<><Inbox className="size-3.5" />Stage 7 · {counts.pending} pending</>}
         title="Review queue"
-        description="Riskiest and least confident first. Every item carries its evidence, sample values and precedents so you can decide in seconds."
+        description="Sorted by risk, then lowest confidence first."
         actions={
           <div className="w-56">
             <div className="mb-1 flex justify-between text-xs text-ink-3"><span>Decided</span><span className="tabular">{decided}/{total}</span></div>
