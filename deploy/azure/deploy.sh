@@ -101,8 +101,8 @@ elif ! az keyvault secret show --vault-name "$KV" -n database-url -o none 2>/dev
   PG_PASSWORD="$(openssl rand -base64 30 | tr -dc 'A-Za-z0-9' | cut -c1-28)Aa1"
   az postgres flexible-server update -g "$RG" -n "$PG" --admin-password "$PG_PASSWORD" -o none
 fi
-az postgres flexible-server db show -g "$RG" -s "$PG" -d ams -o none 2>/dev/null || \
-  az postgres flexible-server db create -g "$RG" -s "$PG" -d ams -o none
+az postgres flexible-server db show -g "$RG" --server-name "$PG" --name ams -o none 2>/dev/null || \
+  az postgres flexible-server db create -g "$RG" --server-name "$PG" --name ams -o none
 if [ -n "$PG_PASSWORD" ]; then
   az keyvault secret set --vault-name "$KV" -n database-url -o none \
     --value "postgres://amsadmin:${PG_PASSWORD}@${PG}.postgres.database.azure.com:5432/ams?sslmode=require"
