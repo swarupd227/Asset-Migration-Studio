@@ -63,11 +63,13 @@ const parseRange = (r?: string) => r?.match(/([\d.]+)\s*[–-]\s*([\d.]+)/)?.sli
 
 // ---------------- Transformations ----------------
 
-export function transform(raw: Dataset, fixes: FixProposal[], mappings: Mapping[]): Dataset {
+/** `opts.notMigratedLocationTypes`: location types an approved skill says are not migrated. */
+export function transform(raw: Dataset, fixes: FixProposal[], mappings: Mapping[], opts: { notMigratedLocationTypes?: string[] } = {}): Dataset {
   const approved = fixes.filter((f) => f.status === 'approved');
   const decided = new Set(mappings.filter((m) => m.status === 'approved' || m.status === 'changed').map((m) => m.id));
   const assets = new Map(raw.assets.map((a) => [a.assetnum, { ...a, specs: { ...a.specs } }]));
-  const locations = [...raw.locations];
+  const skip = new Set(opts.notMigratedLocationTypes ?? []);
+  const locations = raw.locations.filter((l) => !skip.has(l.type));
   let workOrders = raw.workOrders.map((w) => ({ ...w }));
   let pms = raw.pms.map((p) => ({ ...p }));
   const meters = raw.meters.map((m) => ({ ...m, readings: m.readings.map((r) => ({ ...r })) }));

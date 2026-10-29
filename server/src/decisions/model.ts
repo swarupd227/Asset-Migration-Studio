@@ -23,7 +23,8 @@ export interface DecisionAnswer {
 export interface DecisionModel {
   name: string;
   version: string;
-  decide(question: TypedQuestion, inputs: DecisionInput[]): Promise<{ answers: DecisionAnswer[]; tokens: number; costUsd: number }>;
+  /** `hints`: approved skill guidance for this question, added to the model's instructions. */
+  decide(question: TypedQuestion, inputs: DecisionInput[], hints?: string[]): Promise<{ answers: DecisionAnswer[]; tokens: number; costUsd: number }>;
 }
 
 export const MAX_CHOICE_OPTIONS = 255;

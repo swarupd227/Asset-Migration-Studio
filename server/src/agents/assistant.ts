@@ -1,5 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { conceptById } from '../data/ontology.js';
+import { activeSkills, effectsOf } from '../learning/store.js';
+import { getProject } from '../store.js';
 import { currentValidation, dashboard, getCodeRules, getFixes, getMappings, getQuestions, getRuns, MODEL_LABEL } from '../store.js';
 import type { CodeRule, FixProposal, LoadRun, Mapping, Question, ValidationFailure } from '../types.js';
 
@@ -63,6 +65,8 @@ function contextBlock(snap: Snapshot, ctx: ChatContext) {
 
 export async function* answer(pid: string, history: ChatTurn[], ctx: ChatContext): AsyncGenerator<string> {
   const snap = await snapshot(pid);
+  const project = await getProject(pid);
+  const hints = project ? effectsOf(await activeSkills(pid, project), 'prompt_hint').filter((h) => h.effect.agents.includes('assistant')).map((h) => h.effect.text) : [];
   if (client) {
     try {
       const last = history.at(-1)!;
@@ -74,7 +78,7 @@ export async function* answer(pid: string, history: ChatTurn[], ctx: ChatContext
       const stream = client.beta.messages.stream({
         model: MODEL_LABEL,
         max_tokens: 4000,
-        system: SYSTEM,
+        system: hints.length ? `${SYSTEM}\n\nProject guidance from approved skills:\n- ${hints.join('\n- ')}` : SYSTEM,
         messages,
         output_config: { effort: 'low' },
         betas: ['server-side-fallback-2026-07-01'],

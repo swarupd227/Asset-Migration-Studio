@@ -3,6 +3,7 @@ import type {
   AgentEvent, AuditEntry, CatalogueTable, CodeRule, Dashboard, DecisionBatch, ModelDecision, Dataset, FixProposal, LoadRun, Mapping, Person, Project, Question, Stage, ValidationFailure,
 } from './types.js';
 import { bus, one, publish, q, tx } from './db.js';
+import { activeSkills, effectsOf } from './learning/store.js';
 import { conceptById, ONTOLOGY_VERSION } from './data/ontology.js';
 import { conceptOf, dqSnapshot, hierarchyIssues, linkFixes, reconcile, runObjects, transform, validate, type DecisionInputs } from './rules.js';
 
@@ -175,28 +176,28 @@ export const getSignoffs = async (pid: string) =>
 
 const hash = (prev: string, payload: object) => createHash('sha256').update(prev + JSON.stringify(payload)).digest('hex');
 
-export async function audit(pid: string, actor: string, actorKind: AuditEntry['actorKind'], action: string, target?: string, detail?: string, at?: string): Promise<AuditEntry> {
+export async function audit(pid: string, actor: string, actorKind: AuditEntry['actorKind'], action: string, target?: string, detail?: string, at?: string, skills?: { id: string; version: number }[]): Promise<AuditEntry> {
   return tx(async (c) => {
     // Serialise appends per project so the chain never forks.
     await c.query('SELECT pg_advisory_xact_lock(hashtext($1))', [pid]);
     const last = (await c.query<{ seq: number; hash: string }>('SELECT seq, hash FROM audit_log WHERE project_id = $1 ORDER BY seq DESC LIMIT 1', [pid])).rows[0];
     const ts = at ?? new Date().toISOString();
-    const base = { seq: (last?.seq ?? 0) + 1, ts, actor, actorKind, action, target, detail, ontologyVersion: actorKind === 'agent' ? ONTOLOGY_VERSION : undefined, model: actorKind === 'agent' ? MODEL_LABEL : undefined };
+    const base = { seq: (last?.seq ?? 0) + 1, ts, actor, actorKind, action, target, detail, ontologyVersion: actorKind === 'agent' ? ONTOLOGY_VERSION : undefined, model: actorKind === 'agent' ? MODEL_LABEL : undefined, ...(skills?.length ? { skills } : {}) };
     const prevHash = last?.hash ?? '0'.repeat(64);
     const entry: AuditEntry = { ...base, prevHash, hash: hash(prevHash, base) };
     await c.query(
-      'INSERT INTO audit_log (project_id, seq, ts, actor, actor_kind, action, target, detail, ontology_version, model, prev_hash, hash) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)',
-      [pid, entry.seq, ts, actor, actorKind, action, target ?? null, detail ?? null, base.ontologyVersion ?? null, base.model ?? null, prevHash, entry.hash],
+      'INSERT INTO audit_log (project_id, seq, ts, actor, actor_kind, action, target, detail, ontology_version, model, prev_hash, hash, skills) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)',
+      [pid, entry.seq, ts, actor, actorKind, action, target ?? null, detail ?? null, base.ontologyVersion ?? null, base.model ?? null, prevHash, entry.hash, skills?.length ? JSON.stringify(skills) : null],
     );
     return entry;
   });
 }
 
-type AuditRow = { seq: number; ts: Date; actor: string; actor_kind: AuditEntry['actorKind']; action: string; target: string | null; detail: string | null; ontology_version: string | null; model: string | null; prev_hash: string; hash: string };
+type AuditRow = { seq: number; ts: Date; actor: string; actor_kind: AuditEntry['actorKind']; action: string; target: string | null; detail: string | null; ontology_version: string | null; model: string | null; prev_hash: string; hash: string; skills: { id: string; version: number }[] | null };
 export async function auditEntries(pid: string): Promise<AuditEntry[]> {
   return (await q<AuditRow>('SELECT * FROM audit_log WHERE project_id = $1 ORDER BY seq', [pid])).map((r) => ({
     seq: r.seq, ts: r.ts.toISOString(), actor: r.actor, actorKind: r.actor_kind, action: r.action, target: r.target ?? undefined, detail: r.detail ?? undefined,
-    ontologyVersion: r.ontology_version ?? undefined, model: r.model ?? undefined, prevHash: r.prev_hash, hash: r.hash,
+    ontologyVersion: r.ontology_version ?? undefined, model: r.model ?? undefined, ...(r.skills ? { skills: r.skills } : {}), prevHash: r.prev_hash, hash: r.hash,
   }));
 }
 export async function verifyAudit(pid: string) {
@@ -278,9 +279,11 @@ export async function decisionInputs(pid: string): Promise<DecisionInputs> {
 }
 
 async function computeState(pid: string) {
-  const [raw, fixes, mappings, dec] = await Promise.all([loadDataset(pid), getFixes(pid), getMappings(pid), decisionInputs(pid)]);
+  const [raw, fixes, mappings, dec, project] = await Promise.all([loadDataset(pid), getFixes(pid), getMappings(pid), decisionInputs(pid), getProject(pid)]);
+  const skills = project ? await activeSkills(pid, project) : [];
+  const notMigratedLocationTypes = effectsOf(skills, 'location_type_rule').filter((r) => r.effect.action === 'not_migrated').map((r) => r.effect.locationType);
   const rawFailures = validate(raw, dec);
-  const cur = transform(raw, fixes, mappings);
+  const cur = transform(raw, fixes, mappings, { notMigratedLocationTypes });
   const curFailures = linkFixes(validate(cur, dec), fixes);
   return { raw, rawFailures, cur, curFailures, fixes, mappings, dec };
 }
@@ -335,6 +338,8 @@ export async function dashboard(pid: string): Promise<Dashboard & { running: num
   if (cr.length) needsYou.push({ id: 'n-cr', title: `${cr.length} business rules found in custom code to confirm`, detail: cr.map((r) => r.id).join(', '), href: '/discovery?tab=rules', role: 'Migration lead', severity: 'low' });
   const review = (await one<{ n: number }>(`SELECT count(*)::int AS n FROM model_decisions WHERE project_id = $1 AND status = 'needs_review'`, [pid]))?.n ?? 0;
   if (review) needsYou.push({ id: 'n-dec', title: `${review.toLocaleString('en-GB')} work-order tags need a person`, detail: 'Low confidence or the two models disagree', href: '/decisions?status=needs_review', role: 'Data subject expert', severity: 'medium' });
+  const drafts = (await one<{ n: number }>(`SELECT count(*)::int AS n FROM skills WHERE project_id = $1 AND status = 'draft'`, [pid]))?.n ?? 0;
+  if (drafts) needsYou.push({ id: 'n-skill', title: `${drafts} skill draft${drafts > 1 ? 's' : ''} awaiting approval`, detail: 'Drafted by the Ontology Steward from repeated patterns', href: '/skills?tab=drafts', role: 'Data subject expert', severity: 'medium' });
   const quick = mappings.filter((m) => m.path === 'quick' && open(m));
   if (quick.length) needsYou.push({ id: 'n-quick', title: `${quick.length} mappings ready for quick review`, detail: 'Strong evidence; approve or change', href: '/review?path=quick', role: 'Data subject expert', severity: 'low' });
   const sample = mappings.filter((m) => m.path === 'auto' && m.sampled && m.status === 'auto_accepted');

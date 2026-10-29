@@ -18,6 +18,7 @@ import Agents from '@/pages/Agents';
 import Projects from '@/pages/Projects';
 import NewProject from '@/pages/NewProject';
 import Decisions from '@/pages/Decisions';
+import Skills from '@/pages/Skills';
 
 export function App() {
   return (
@@ -40,6 +41,7 @@ export function App() {
             <Route path="proof" element={<ProofPack />} />
             <Route path="audit" element={<Audit />} />
             <Route path="ontology" element={<Ontology />} />
+            <Route path="skills" element={<Skills />} />
             <Route path="memory" element={<Memory />} />
             <Route path="agents" element={<Agents />} />
             <Route path="*" element={<MissionControl />} />

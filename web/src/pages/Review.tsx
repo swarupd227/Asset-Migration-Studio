@@ -46,6 +46,7 @@ function QueueRow({ m, selected, onClick }: { m: Mapping; selected: boolean; onC
       </div>
       <div className="mt-1 flex items-center gap-1.5 pl-3.5">
         <span className="min-w-0 flex-1 truncate text-xs text-ink-3">→ {m.conceptLabel}</span>
+        {!!m.skills?.length && <Badge tone="agent" title={`Shaped by ${m.skills.map((s) => `${s.name} v${s.version}`).join(', ')}`}>Skill</Badge>}
         {m.riskScore !== undefined && <Badge tone={m.riskScore >= 4 ? 'crit' : m.riskScore === 3 ? 'warn' : 'neutral'} title="Review risk, 1 to 5">Risk {m.riskScore}</Badge>}
         {m.safetyCritical && <Badge tone="crit">Safety</Badge>}
         {m.regulatory && <Badge tone="crit">Regulatory</Badge>}

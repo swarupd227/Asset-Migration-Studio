@@ -5,6 +5,7 @@ import { INDUSTRY_PACK, ONTOLOGY_VERSION } from './data/ontology.js';
 import { assets, closedWorkOrders, locations, meters, people, pmPlans, workOrders } from './data/seed.js';
 import { buildMappings, catalogue, codeRules } from './data/catalog.js';
 import { proposeFixes, validate } from './rules.js';
+import { seedSharedLibrary } from './learning/library.js';
 import { addRun, audit, buildRun, getProject, insertRecords, loadDataset, putItems, setStage, STAGES } from './store.js';
 
 const ago = (mins: number) => new Date(Date.now() - mins * 60_000).toISOString();
@@ -34,6 +35,7 @@ export async function createProject(input: NewProject, actor: { id: string; name
     if (input.mode === 'preview' && !s.previewEligible) continue;
     await setStage(pid, s.n, { status: s.n === 1 ? 'ready' : 'locked' });
   }
+  await seedSharedLibrary();
   await audit(pid, actor.name, 'user', 'project.create', pid, `Pinned ontology ${input.ontologyVersion ?? ONTOLOGY_VERSION}, pack ${input.industryPack ?? INDUSTRY_PACK}${expires ? `, expires ${expires.toISOString().slice(0, 10)}` : ''}`);
   return (await getProject(pid))!;
 }
@@ -134,6 +136,7 @@ export async function bootstrap() {
   const hasProjects = await one<{ n: number }>('SELECT count(*)::int AS n FROM projects');
   if (!hasProjects?.n) await seedNorthvale();
   else await backfillClosedHistory();
+  await seedSharedLibrary();
 }
 
 /** Projects loaded before closed history was part of the Northvale extract get it added once. */

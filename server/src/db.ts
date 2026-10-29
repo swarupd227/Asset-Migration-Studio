@@ -102,11 +102,32 @@ CREATE TABLE IF NOT EXISTS decision_batches (
 );
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS decision_model TEXT NOT NULL DEFAULT 'auto';
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS decision_thresholds JSONB NOT NULL DEFAULT '{"auto": 0.85, "human": 0.60, "sample": 0.05}';
+-- Skill library: how agents do the work (the mapping memory holds what was decided).
+CREATE TABLE IF NOT EXISTS skills (
+  id TEXT NOT NULL, version INT NOT NULL, project_id TEXT REFERENCES projects(id) ON DELETE CASCADE, scope TEXT NOT NULL,
+  status TEXT NOT NULL, data JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (id, version)
+);
+CREATE INDEX IF NOT EXISTS skills_by_project ON skills (project_id, status);
+CREATE TABLE IF NOT EXISTS skill_library (
+  version TEXT PRIMARY KEY, published_at TIMESTAMPTZ NOT NULL DEFAULT now(), published_by TEXT NOT NULL, skills JSONB NOT NULL
+);
+CREATE TABLE IF NOT EXISTS skill_triggers (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, key TEXT NOT NULL, kind TEXT NOT NULL,
+  skill_id TEXT, data JSONB NOT NULL, fired_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (project_id, key)
+);
+CREATE TABLE IF NOT EXISTS skill_uses (
+  id BIGSERIAL PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, skill_id TEXT NOT NULL,
+  version INT NOT NULL, agent TEXT NOT NULL, ref TEXT, items INT NOT NULL DEFAULT 1, at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS skill_uses_by_skill ON skill_uses (project_id, skill_id);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS skill_library_version TEXT;
 CREATE TABLE IF NOT EXISTS audit_log (
   project_id TEXT NOT NULL, seq INT NOT NULL, ts TIMESTAMPTZ NOT NULL, actor TEXT NOT NULL, actor_kind TEXT NOT NULL,
   action TEXT NOT NULL, target TEXT, detail TEXT, ontology_version TEXT, model TEXT, prev_hash TEXT NOT NULL, hash TEXT NOT NULL,
   PRIMARY KEY (project_id, seq)
 );
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS skills JSONB;
 -- The audit log is write-once: no role, including administrators using the app, can change or remove entries.
 CREATE OR REPLACE FUNCTION audit_log_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'audit_log is append-only'; END $$;

@@ -189,6 +189,11 @@ export interface Mapping {
   patternKey?: string; // items sharing an evidence pattern can be bulk-approved
   /** Review risk from the decision layer, 1 (low) to 5 (high). */
   riskScore?: number;
+  /** Kind of reviewer correction, used by skill triggers. */
+  correctionKind?: 'target' | 'rule' | 'concept' | 'not_migrated' | 'reject';
+  decidedAt?: string;
+  /** Skills that shaped this proposal. */
+  skills?: { id: string; version: number; name: string }[];
 }
 
 export interface CodeRule {
@@ -347,6 +352,8 @@ export interface AuditEntry {
   detail?: string;
   ontologyVersion?: string;
   model?: string;
+  /** Skills loaded for this agent call (AL-04). */
+  skills?: { id: string; version: number }[];
   prevHash: string;
   hash: string;
 }
@@ -447,6 +454,8 @@ export interface ModelDecision {
   sampled?: boolean;
   /** Recorded as "none or unclear" because no answer was confident enough. */
   abstained?: boolean;
+  /** Skill whose rule settled this record. */
+  skill?: { id: string; version: number; name: string };
   decidedBy?: string;
   reviewNote?: string;
   createdAt: string;
@@ -473,3 +482,48 @@ export interface DecisionQuestionInfo {
   fields: string[];
   description: string;
 }
+
+// ---------------- Skill library ----------------
+
+export type SkillStatus = 'draft' | 'approved' | 'measured' | 'proposed' | 'tested' | 'published' | 'rejected' | 'retired';
+
+export interface SkillConditions {
+  sourceSystems?: string[]; // matched as prefixes, e.g. "IBM Maximo 7.6"
+  industryPacks?: string[];
+  objects?: string[];
+  questions?: string[];
+}
+
+export type SkillEffect =
+  | { type: 'decision_rule'; question: string; pattern: string; answer: string }
+  | { type: 'prompt_hint'; agents: ('decision-model' | 'reasoning' | 'aligner' | 'assistant')[]; text: string }
+  | { type: 'location_type_rule'; locationType: string; action: 'functional_object' | 'not_migrated' }
+  | { type: 'load_precheck'; check: 'default_site' | 'class_characteristics' };
+
+export interface SkillEvidence { kind: string; ref: string; text: string }
+
+export interface Skill {
+  id: string;
+  version: number;
+  name: string;
+  description: string;
+  scope: 'project' | 'shared';
+  projectId?: string;
+  status: SkillStatus;
+  owner: string;
+  conditions: SkillConditions;
+  steps: string[];
+  examples: string[];
+  effects: SkillEffect[];
+  evidence: SkillEvidence[];
+  trigger?: { kind: string; key: string };
+  learnedFrom: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  statusNote?: string;
+  measuredEffect?: { uses: number; before: Record<string, number | null>; after: Record<string, number | null>; enoughData: boolean; at: string };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SkillRef { id: string; version: number; name?: string }

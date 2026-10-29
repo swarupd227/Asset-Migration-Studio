@@ -5,6 +5,9 @@ import {
   runSignable, setStage, touch, updateProject, upsertFixes,
 } from '../store.js';
 import { alignProject } from './aligner.js';
+import { activeSkills, effectsOf, recordUse, refs } from '../learning/store.js';
+import { evaluateLater } from '../learning/engine.js';
+import { getProject } from '../store.js';
 import { runQuestions } from '../decisions/flow.js';
 import { questionsForStage } from '../decisions/questions.js';
 import { decisionInputs } from '../store.js';
@@ -99,9 +102,39 @@ async function steps(pid: string, n: number): Promise<Step[]> {
   }
 }
 
+/** Skill steps for a stage: load pre-checks before the dry-run load, location rules in alignment. */
+async function skillSteps(pid: string, n: number): Promise<Step[]> {
+  const project = await getProject(pid);
+  if (!project || (n !== 9 && n !== 5)) return [];
+  const skills = await activeSkills(pid, project);
+  const out: Step[] = [];
+  const ds = await loadDataset(pid);
+  if (n === 9) {
+    for (const { skill, effect } of effectsOf(skills, 'load_precheck')) {
+      if (effect.check === 'default_site') {
+        const sites = new Set(ds.locations.filter((l) => l.type === 'SITE').map((l) => l.location));
+        const missing = ds.workOrders.filter((w) => !w.siteid || !sites.has(w.siteid)).length;
+        await recordUse(pid, skill, 'orchestrator', 'stage 9', 1);
+        await audit(pid, 'orchestrator', 'agent', 'skill.apply', skill.id, `Default site check: ${missing} work orders without a known site`, undefined, refs([skill]));
+        out.push({ agent: 'orchestrator', kind: 'tool', tool: 'precheck.default_site', args: `skill ${skill.id}`, text: `Skill "${skill.name}": checked the source default site before loading; ${missing} work orders without a known site.`, ms: 300 });
+      }
+    }
+  }
+  if (n === 5) {
+    for (const { skill, effect } of effectsOf(skills, 'location_type_rule')) {
+      const count = ds.locations.filter((l) => l.type === effect.locationType).length;
+      if (!count) continue;
+      await recordUse(pid, skill, 'hierarchy', 'stage 5', count);
+      out.push({ agent: 'hierarchy', kind: 'result', text: `Skill "${skill.name}": ${count} ${effect.locationType} locations ${effect.action === 'functional_object' ? 'become functional objects' : 'are not migrated'}.` });
+    }
+  }
+  return out;
+}
+
 async function play(pid: string, n: number) {
   await setStage(pid, n, { status: 'running', started: true });
   await touch(pid);
+  for (const step of await skillSteps(pid, n)) await emitAgent(pid, { ...step, stage: n });
   for (const step of await steps(pid, n)) {
     await sleep(step.wait ?? 450 + Math.min(step.ms ?? 300, 1500));
     const { wait, ...ev } = step;
@@ -145,6 +178,7 @@ export async function runStage(pid: string, n: number, actor: string) {
       if (runSignable(run)) await setStage(pid, 12, { status: 'ready' });
       await emitAgent(pid, { agent: 'orchestrator', kind: 'done', stage: 11, text: `Run ${run.number} complete · data quality ${(run.dqScore * 100).toFixed(1)}% · ${runSignable(run) ? 'ready for sign-off' : `${fails} reconciliation checks failing, ${run.errors.length} errors in the queue`}.` });
       await audit(pid, 'orchestrator', 'agent', 'load.run', run.id, `Dry run ${run.number} · ${run.transformationVersion} · ${ONTOLOGY_VERSION}`);
+      evaluateLater(pid);
     } else {
       if (n === 5 && !(await getMappings(pid)).length) {
         await emitAgent(pid, { agent: 'aligner', kind: 'plan', stage: 5, text: 'Binding catalogue fields to ontology concepts from the mapping memory and the model.' });

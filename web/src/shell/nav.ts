@@ -1,5 +1,5 @@
 import {
-  Bot, BookOpenText, Gauge, BrainCircuit, CheckCheck, FileCheck2, GitFork, Inbox, LayoutDashboard, Network, PlugZap, ScanSearch, ScrollText, ShieldAlert, Sparkle,
+  Bot, BookOpenText, Gauge, Library, BrainCircuit, CheckCheck, FileCheck2, GitFork, Inbox, LayoutDashboard, Network, PlugZap, ScanSearch, ScrollText, ShieldAlert, Sparkle,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -37,6 +37,7 @@ export const navGroups: { label: string; items: NavItem[] }[] = [
     label: 'Knowledge',
     items: [
       { to: '/ontology', label: 'Ontology', icon: BookOpenText, hint: 'Industrial Asset Ontology, code lists, governance' },
+      { to: '/skills', label: 'Skill library', icon: Library, hint: 'How agents do the work: steps, checks, known traps' },
       { to: '/memory', label: 'Mapping memory', icon: BrainCircuit, hint: 'Precedents and privacy model' },
       { to: '/agents', label: 'Agents & evals', icon: Bot, hint: '14 agents, guardrails, golden datasets' },
     ],

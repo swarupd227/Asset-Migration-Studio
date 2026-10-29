@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { Check, Cpu, Gauge, Hand, Play, Sparkles, SquareFunction, Timer, UserRound } from 'lucide-react';
 import type { DecisionBatch, DecisionQuestionInfo, ModelDecision } from '@shared/types';
@@ -208,11 +208,14 @@ export default function Decisions() {
           ) : (
             <div className="divide-y divide-line">
               {list.map((d) => (
-                <div key={d.id} className="grid grid-cols-[110px_1fr_220px_90px] items-center gap-3 px-4 py-2 text-[12.5px]">
+                <div key={d.id} className="grid grid-cols-[110px_1fr_220px_auto] items-center gap-3 px-4 py-2 text-[12.5px]">
                   <Mono>{d.recordKey}</Mono>
                   <span className="truncate text-ink-2">{d.input}</span>
                   <span className="truncate font-medium">{d.answer}</span>
-                  <span className="flex justify-end">{d.step === 'human' ? <Badge tone="neutral" icon={UserRound}>{d.decidedBy}</Badge> : <Confidence value={d.confidence} />}</span>
+                  <span className="flex justify-end gap-1.5">
+                    {d.skill && <Link to="/skills" title={`Settled by skill ${d.skill.id} v${d.skill.version}`}><Badge tone="agent">Skill: {d.skill.name.slice(0, 28)}</Badge></Link>}
+                    {d.step === 'human' ? <Badge tone="neutral" icon={UserRound}>{d.decidedBy}</Badge> : <Confidence value={d.confidence} />}
+                  </span>
                 </div>
               ))}
             </div>

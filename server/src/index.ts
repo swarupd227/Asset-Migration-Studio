@@ -21,7 +21,11 @@ import { answer, liveModel, type ChatTurn } from './agents/assistant.js';
 import { decisionModelFor, decisionSetting, runQuestions, thresholdsFor } from './decisions/flow.js';
 import { QUESTIONS, RUN_ORDER } from './decisions/questions.js';
 import { decisionStats, getDecisions } from './store.js';
-import type { ModelDecision } from './types.js';
+import type { ModelDecision, Skill } from './types.js';
+import { evaluateLater, evaluateTriggers } from './learning/engine.js';
+import { getSkill, matches, pinnedLibrary, projectSkills, saveSkill, skillUseCounts } from './learning/store.js';
+import { baseline, measureProjectSkills } from './learning/measure.js';
+import { toSkillMd } from './learning/format.js';
 import type { CodeRule, Mapping, Person, Question } from './types.js';
 
 const app = express();
@@ -253,11 +257,62 @@ p.post('/decisions/:id', wrap(async (req, res) => {
   if (!answer || !d.options.includes(answer)) throw new HttpError(400, 'Answer must be one of the options');
   if (body.decision === 'override' && !body.note?.trim()) throw new HttpError(400, 'An override needs a reason');
   const status = body.decision === 'override' && answer !== d.answer ? 'overridden' : 'accepted';
-  const updated: ModelDecision = { ...d, answer, status, step: 'human', decidedBy: actor.name, reviewNote: body.note?.trim() };
+  const updated: ModelDecision & { modelAnswer: string; modelConfidence: number } = { ...d, answer, status, step: 'human', decidedBy: actor.name, reviewNote: body.note?.trim(), modelAnswer: d.answer, modelConfidence: d.confidence };
   await q('UPDATE model_decisions SET answer = $3, status = $4, step = $5, data = $6 WHERE project_id = $1 AND id = $2', [pid, d.id, answer, status, 'human', JSON.stringify(updated)]);
   await audit(pid, actor.name, 'user', `decision.${body.decision}`, d.id, `${answer}${body.note ? ` · ${body.note}` : ''}`);
+  evaluateLater(pid);
   await touch(pid);
   res.json(updated);
+}));
+
+// Skills
+p.get('/skills', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  await measureProjectSkills(pid);
+  const [all, uses, triggers] = await Promise.all([projectSkills(pid), skillUseCounts(pid), q('SELECT key, kind, skill_id AS "skillId", fired_at AS "firedAt", data FROM skill_triggers WHERE project_id = $1 ORDER BY fired_at DESC', [pid])]);
+  const project = (await getProject(pid))!;
+  const withUse = (s: Skill) => ({ ...s, uses: uses.get(s.id)?.uses ?? 0, lastUsed: uses.get(s.id)?.last, applies: matches(s, project) });
+  const libraries = await q<{ version: string; published_at: Date; published_by: string }>('SELECT version, published_at, published_by FROM skill_library ORDER BY published_at DESC');
+  res.json({ library: all.library, libraries, shared: all.shared.map(withUse), project: all.project.map(withUse), triggers });
+}));
+p.get('/skills/:id/SKILL.md', wrap(async (req, res) => {
+  const s = await getSkill(String(req.params.id));
+  if (!s || (s.projectId && s.projectId !== pidOf(req))) throw new HttpError(404, 'Not found');
+  res.type('text/markdown').set('Content-Disposition', `attachment; filename="${s.id}-SKILL.md"`).send(toSkillMd(s));
+}));
+p.post('/skills/evaluate', wrap(async (req, res) => {
+  const actor = await actorOf(req);
+  if (!['Migration lead', 'Data subject expert'].includes(actor.role)) throw new HttpError(403, 'Migration leads and data subject experts run the trigger check');
+  res.json({ fired: (await evaluateTriggers(pidOf(req))).map((h) => h.title) });
+}));
+p.post('/skills/:id/decision', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const body = parse(z.object({ decision: z.enum(['approve', 'reject', 'retire']), reason: z.string().max(1000).optional(), actor: z.string() }), req.body);
+  const actor = await actorOf(req);
+  const s = await getSkill(String(req.params.id));
+  if (!s || (s.projectId && s.projectId !== pid)) throw new HttpError(404, 'Not found');
+  if (s.scope === 'shared' && actor.role !== 'Ontology curator') throw new HttpError(403, 'Only the ontology curator changes shared skills');
+  if (s.scope === 'project' && actor.role !== 'Data subject expert') throw new HttpError(403, 'A data subject expert approves project skills');
+  if (body.decision !== 'approve' && !body.reason?.trim()) throw new HttpError(400, 'A reason is required');
+  if (body.decision === 'approve' && s.status !== 'draft') throw new HttpError(400, 'Only drafts can be approved');
+  const next: Skill & { baseline?: unknown } = { ...s, status: body.decision === 'approve' ? 'approved' : body.decision === 'reject' ? 'rejected' : 'retired', statusNote: body.reason?.trim(),
+    ...(body.decision === 'approve' ? { approvedBy: actor.name, approvedAt: new Date().toISOString(), baseline: await baseline(pid, s) } : {}) };
+  await saveSkill(next);
+  await audit(pid, actor.name, 'user', `skill.${body.decision}`, `${s.id} v${s.version}`, body.reason ?? s.name);
+  await touch(pid);
+  res.json(next);
+}));
+p.post('/skills/library', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const body = parse(z.object({ version: z.string(), actor: z.string() }), req.body);
+  const actor = await actorOf(req);
+  if (actor.role !== 'Migration lead') throw new HttpError(403, 'Only the migration lead changes the pinned skill library');
+  if (!(await one('SELECT version FROM skill_library WHERE version = $1', [body.version]))) throw new HttpError(404, 'Unknown library version');
+  const before = (await pinnedLibrary(pid)).version;
+  await q('UPDATE projects SET skill_library_version = $2 WHERE id = $1', [pid, body.version]);
+  await audit(pid, actor.name, 'user', 'skill.library.pin', body.version, `from ${before ?? 'none'}`);
+  await touch(pid);
+  res.json({ ok: true, version: body.version });
 }));
 
 // Discovery
@@ -310,6 +365,9 @@ async function decide(pid: string, m: Mapping, d: z.infer<typeof Decision>, acto
   if (m.path === 'named' && d.decision === 'approve' && !note) throw new HttpError(400, 'Named approvals need a review note');
   m.reviewer = actor.name;
   m.reviewNote = note;
+  m.decidedAt = new Date().toISOString();
+  m.correctionKind = d.decision === 'reject' ? 'reject' : d.decision === 'not_migrated' ? 'not_migrated'
+    : d.decision === 'change' ? (d.change?.target && d.change.target !== m.target ? 'target' : 'rule') : undefined;
   m.status = ({ approve: 'approved', reject: 'rejected', not_migrated: 'not_migrated', change: 'changed' } as const)[d.decision];
   if (d.decision === 'change') {
     m.version++;
@@ -319,6 +377,7 @@ async function decide(pid: string, m: Mapping, d: z.infer<typeof Decision>, acto
   }
   await putItem(pid, 'mapping', m);
   await audit(pid, actor.name, 'user', `mapping.${d.decision}`, m.id, note);
+  if (m.correctionKind) evaluateLater(pid);
   if (d.decision === 'change') await emitAgent(pid, { agent: m.agent === 'Hierarchy Agent' ? 'hierarchy' : 'aligner', kind: 'result', text: `Applied ${actor.name}'s change to ${m.id} as v${m.version}; stored as a precedent.` });
 }
 
