@@ -83,7 +83,7 @@ export default function MissionControl() {
         actions={<>
           <Button icon={Sparkles} onClick={() => ask('What needs my attention?')}>What needs me?</Button>
           <Button variant="agent" icon={Play} disabled={busy || nextRun?.status === 'locked'} onClick={() => runStage(8)}>
-            {d.job?.status === 'queued' ? 'Queued…' : busy ? 'Agents working…' : `Start Run ${d.stages.find((s) => s.n === 9)?.metric?.replace('Run ', '') ? Number(d.stages.find((s) => s.n === 9)!.metric!.replace('Run ', '')) + 1 : 3}`}
+            {d.job?.status === 'queued' ? 'Queued…' : busy ? 'Agents working…' : `Start Run ${(Number(d.stages.find((s) => s.n === 9)?.metric?.match(/Run (\d+)/)?.[1]) || 0) + 1}`}
           </Button>
         </>}
       />
@@ -152,7 +152,7 @@ export default function MissionControl() {
                 { n: k.quickReview, c: 'bg-info', l: 'Quick 0.75–0.95' },
                 { n: k.expertReview, c: 'bg-warn', l: 'Expert < 0.75' },
                 { n: k.namedReview, c: 'bg-crit', l: 'Named (safety / regulatory)' },
-              ].map((x) => <motion.div key={x.l} className={x.c} initial={{ width: 0 }} animate={{ width: `${(x.n / totalPaths) * 100}%` }} title={`${x.l}: ${x.n}`} />)}
+              ].map((x) => <motion.div key={x.l} className={x.c} initial={{ width: 0 }} animate={{ width: `${totalPaths ? (x.n / totalPaths) * 100 : 0}%` }} title={`${x.l}: ${x.n}`} />)}
             </div>
             <div className="mt-3 grid grid-cols-4 gap-2 text-xs">
               {[
@@ -168,8 +168,8 @@ export default function MissionControl() {
               ))}
             </div>
             <div className="mt-3">
-              <div className="mb-1 flex justify-between text-xs text-ink-3"><span>Decisions made</span><span className="tabular">{pct(decided / k.sourceElements, 0)}</span></div>
-              <Progress value={decided / k.sourceElements} tone="ok" />
+              <div className="mb-1 flex justify-between text-xs text-ink-3"><span>Decisions made</span><span className="tabular">{pct(k.sourceElements ? decided / k.sourceElements : 0, 0)}</span></div>
+              <Progress value={k.sourceElements ? decided / k.sourceElements : 0} tone="ok" />
             </div>
           </Card>
           <Stat label="Data quality score" icon={CheckCircle2} tone="ok" to="/quality"

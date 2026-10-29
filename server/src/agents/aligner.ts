@@ -72,7 +72,7 @@ function heuristicConcept(name: string): string {
 export async function alignProject(pid: string, tables: CatalogueTable[]): Promise<Mapping[]> {
   const templates = new Map(buildMappings().map((m) => [m.sourceElements[0], m]));
   const out: Mapping[] = [];
-  const unknown: { element: string; type: string; nullRate: number; topValues: string[]; pattern?: string; table: string }[] = [];
+  const unknown: { element: string; type: string; nullRate: number; topValues: string[]; pattern?: string; table: string; custom: boolean }[] = [];
   let seq = 1;
   const nextId = () => `M-${String(seq++).padStart(3, '0')}`;
 
@@ -90,14 +90,14 @@ export async function alignProject(pid: string, tables: CatalogueTable[]): Promi
           evidence: [profileEv, ...tpl.evidence.filter((e) => e.type !== 'profile' && e.type !== 'code')], precedents: prec, samples: [], reviewer: undefined, reviewNote: undefined, version: 1,
         });
       } else {
-        unknown.push({ element, type: f.type, nullRate: f.nullRate, topValues: f.topValues.slice(0, 5).map((v) => v.value), pattern: f.pattern, table: t.name });
+        unknown.push({ element, type: f.type, nullRate: f.nullRate, topValues: f.topValues.slice(0, 5).map((v) => v.value), pattern: f.pattern, table: t.name, custom: !!f.custom });
       }
     }
   }
 
   const project = await getProject(pid);
   const hintSkills = project ? effectsOf(await activeSkills(pid, project), 'prompt_hint').filter((h) => h.effect.agents.includes('aligner')) : [];
-  const model = await bindWithModel(unknown.map(({ table, ...u }) => (void table, u)), hintSkills.map((h) => h.effect.text));
+  const model = await bindWithModel(unknown.map(({ table, custom, ...u }) => (void table, void custom, u)), hintSkills.map((h) => h.effect.text));
   for (const h of hintSkills) await recordUse(pid, h.skill, 'aligner', 'alignment', unknown.length);
   const byEl = new Map(model.map((b) => [b.element, b]));
   for (const u of unknown) {
@@ -106,7 +106,7 @@ export async function alignProject(pid: string, tables: CatalogueTable[]): Promi
     const c = conceptById.get(cid)!;
     const conf = b ? Math.max(0.3, Math.min(0.93, b.confidence)) : 0.55;
     const evidence: Evidence[] = [
-      { type: 'metadata', content: `${u.element} is a ${u.type} field outside the vendor standard.`, source: 'Metadata Harvester', weight: 0.2 },
+      { type: 'metadata', content: u.custom ? `${u.element} is a ${u.type} field outside the vendor standard.` : `${u.element} is a standard ${u.type} field with no approved mapping in the memory yet.`, source: 'Metadata Harvester', weight: 0.2 },
       { type: 'profile', content: `${u.nullRate}% null${u.topValues.length ? `; top values ${u.topValues.slice(0, 3).join(', ')}` : ''}.`, source: 'Profiler', weight: 0.2 },
       ...(b ? [{ type: 'ontology' as const, content: b.rationale, source: `Concept Aligner · ${MODEL_LABEL} · find_concept`, weight: 0.3 }] : []),
     ];
@@ -114,7 +114,7 @@ export async function alignProject(pid: string, tables: CatalogueTable[]): Promi
       id: nextId(), object: u.table, sourceElements: [u.element], conceptId: cid, conceptLabel: c.label,
       target: b?.target ?? `${c.bindings.ifs ?? 'Custom field'} (custom)`, kind: 'one_to_one', rule: b ? 'Copy; see evidence.' : 'Needs a decision: no precedent and no confident binding.',
       confidence: conf, risk: conf < 0.75 ? 'medium' : 'low', safetyCritical: false, regulatory: false, path: pathFor(conf, false, false), status: 'proposed',
-      evidence, precedents: await tenantPrecedents(u.element, pid), alternatives: [], samples: [], agent: 'Concept Aligner', custom: true, version: 1,
+      evidence, precedents: await tenantPrecedents(u.element, pid), alternatives: [], samples: [], agent: 'Concept Aligner', custom: u.custom, version: 1,
       ...(b && hintSkills.length ? { skills: hintSkills.map((h) => ({ id: h.skill.id, version: h.skill.version, name: h.skill.name })) } : {}),
     });
   }

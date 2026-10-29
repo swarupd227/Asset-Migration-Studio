@@ -99,6 +99,7 @@ function SidePanel({ m, onClose }: { m: Mapping; onClose: () => void }) {
 
 export default function Alignment() {
   const { data } = useApi<Mapping[]>('/mappings');
+  const { dashboard } = useApp();
   const [object, setObject] = useState('all');
   const [q, setQ] = useState('');
   const [view, setView] = useState<'all' | 'low'>('all');
@@ -139,7 +140,7 @@ export default function Alignment() {
             <Stat label="Bindings" value={all.length} sub={`${objects.length} Maximo objects`} icon={Network} tone="agent" />
             <Stat label="Avg confidence" value={avg.toFixed(2)} sub="calibrated" icon={Target} />
             <Stat label="Backed by precedent" value={pct(withPrec / (all.length || 1), 0)} sub={`${withPrec} from mapping memory`} icon={BrainCircuit} tone="ok" />
-            <Stat label="Custom elements" value={custom} sub="NV_ fields and tables" icon={Puzzle} tone="warn" />
+            <Stat label="Custom elements" value={custom} sub="customer fields and tables" icon={Puzzle} tone="warn" />
             <Stat label="Target config needed" value={config} sub="for the IFS consultant" icon={Settings2} tone="info" />
           </div>
 
@@ -158,7 +159,7 @@ export default function Alignment() {
           <div className={cx('grid items-start gap-4', selected && '@5xl:grid-cols-[1fr_360px]')}>
             <Card pad={false} className="min-w-0 overflow-hidden">
               <div className="grid grid-cols-[minmax(0,1fr)_20px_minmax(0,1.1fr)_20px_minmax(0,1fr)_auto] gap-1 border-b border-line bg-surface-2 px-3 py-2 text-[10.5px] font-semibold uppercase tracking-wider text-ink-4">
-                <span>Maximo 7.6</span><span /><span className="text-agent/80">Ontology concept · {all[0] ? 'IAO 2.4' : ''}</span><span /><span className="text-accent/80">IFS Cloud</span><span className="pl-2 text-right">Confidence</span>
+                <span>Maximo 7.6</span><span /><span className="text-agent/80">Ontology concept · {dashboard?.project.ontologyVersion ?? ''}</span><span /><span className="text-accent/80">IFS Cloud</span><span className="pl-2 text-right">Confidence</span>
               </div>
               {groups.length === 0 && <div className="p-6"><Empty icon={Search} title="No bindings match">Try another filter.</Empty></div>}
               {groups.map(([obj, ms]) => (
