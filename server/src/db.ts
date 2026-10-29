@@ -82,6 +82,26 @@ CREATE INDEX IF NOT EXISTS agent_events_by_project ON agent_events (project_id, 
 CREATE TABLE IF NOT EXISTS ontology_proposals (
   id TEXT PRIMARY KEY, status TEXT NOT NULL, data JSONB NOT NULL
 );
+-- Decision layer: typed decisions on records, a per-project cache, and one row per batch run.
+CREATE TABLE IF NOT EXISTS model_decisions (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, id TEXT NOT NULL, question_id TEXT NOT NULL,
+  record_kind TEXT NOT NULL, record_key TEXT NOT NULL, input_hash TEXT NOT NULL, step TEXT NOT NULL, status TEXT NOT NULL,
+  confidence REAL NOT NULL, answer TEXT NOT NULL, data JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, id)
+);
+CREATE INDEX IF NOT EXISTS model_decisions_by_question ON model_decisions (project_id, question_id, status);
+CREATE INDEX IF NOT EXISTS model_decisions_by_record ON model_decisions (project_id, record_kind, record_key);
+CREATE TABLE IF NOT EXISTS decision_cache (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, input_hash TEXT NOT NULL, question_id TEXT NOT NULL,
+  ontology_version TEXT NOT NULL, model TEXT NOT NULL, data JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, input_hash, question_id, ontology_version, model)
+);
+CREATE TABLE IF NOT EXISTS decision_batches (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, id TEXT NOT NULL, question_id TEXT NOT NULL,
+  data JSONB NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (project_id, id)
+);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS decision_model TEXT NOT NULL DEFAULT 'auto';
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS decision_thresholds JSONB NOT NULL DEFAULT '{"auto": 0.85, "human": 0.60, "sample": 0.05}';
 CREATE TABLE IF NOT EXISTS audit_log (
   project_id TEXT NOT NULL, seq INT NOT NULL, ts TIMESTAMPTZ NOT NULL, actor TEXT NOT NULL, actor_kind TEXT NOT NULL,
   action TEXT NOT NULL, target TEXT, detail TEXT, ontology_version TEXT, model TEXT, prev_hash TEXT NOT NULL, hash TEXT NOT NULL,

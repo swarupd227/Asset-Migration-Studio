@@ -18,6 +18,10 @@ import { randomBytes } from 'node:crypto';
 import { hierarchyIssues, hierarchyTree, rules } from './rules.js';
 import { reviewProgressNudge, runStage } from './agents/orchestrator.js';
 import { answer, liveModel, type ChatTurn } from './agents/assistant.js';
+import { decisionModelFor, runQuestion, thresholdsFor } from './decisions/flow.js';
+import { QUESTIONS } from './decisions/questions.js';
+import { decisionStats, getDecisions } from './store.js';
+import type { ModelDecision } from './types.js';
 import type { CodeRule, Mapping, Person, Question } from './types.js';
 
 const app = express();
@@ -198,6 +202,50 @@ p.post('/extracts', express.text({ type: () => true, limit: '50mb' }), wrap(asyn
   await emitAgent(pid, { agent: 'profiler', kind: 'result', text: `${filename}: ${data.length.toLocaleString('en-GB')} rows profiled into ${table} (${entry.fields.filter((f) => f.custom).length} custom columns, ${records.length.toLocaleString('en-GB')} records loaded).` });
   await touch(pid);
   res.status(201).json({ id, table, rows: data.length, columns: header.length, records: records.length, custom: entry.fields.filter((f) => f.custom).map((f) => f.name) });
+}));
+
+// Decisions
+p.get('/decisions/questions', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const [model, thresholds] = await Promise.all([decisionModelFor(pid), thresholdsFor(pid)]);
+  res.json({ questions: QUESTIONS.map(({ prompt, ...qq }) => (void prompt, qq)), model: model.name, reasoningModel: liveModel ? MODEL_LABEL : null, thresholds });
+}));
+p.get('/decisions/stats', wrap(async (req, res) => res.json(await decisionStats(pidOf(req)))));
+p.get('/decisions', wrap(async (req, res) => {
+  const s = (k: string) => (req.query[k] ? String(req.query[k]) : undefined);
+  res.json(await getDecisions(pidOf(req), { question: s('question'), status: s('status'), step: s('step'), record: s('record'), limit: Number(req.query.limit ?? 100), offset: Number(req.query.offset ?? 0) }));
+}));
+const running = new Set<string>();
+p.post('/decisions/run', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const body = parse(z.object({ question: z.string(), actor: z.string() }), req.body);
+  const actor = await actorOf(req);
+  if (!['Migration lead', 'Data subject expert'].includes(actor.role)) throw new HttpError(403, 'Migration leads and data subject experts run decision batches');
+  if (!QUESTIONS.some((x) => x.id === body.question)) throw new HttpError(404, 'Unknown question');
+  if (running.has(pid)) throw new HttpError(409, 'A decision batch is already running');
+  running.add(pid);
+  runQuestion(pid, body.question, actor.name)
+    .catch((e) => emitAgent(pid, { agent: 'decision-model', kind: 'error', text: String(e?.message ?? e) }))
+    .finally(() => { running.delete(pid); touch(pid); });
+  res.status(202).json({ ok: true });
+}));
+p.post('/decisions/:id', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const body = parse(z.object({ decision: z.enum(['accept', 'override']), answer: z.string().optional(), note: z.string().max(1000).optional(), actor: z.string() }), req.body);
+  const actor = await actorOf(req);
+  if (!['Data subject expert', 'Migration lead', 'Customer data owner'].includes(actor.role)) throw new HttpError(403, `${actor.role} cannot decide record tags`);
+  const row = await one<{ data: ModelDecision }>('SELECT data FROM model_decisions WHERE project_id = $1 AND id = $2', [pid, String(req.params.id)]);
+  if (!row) throw new HttpError(404, 'Not found');
+  const d = row.data;
+  const answer = body.decision === 'override' ? body.answer : (d.answer);
+  if (!answer || !d.options.includes(answer)) throw new HttpError(400, 'Answer must be one of the options');
+  if (body.decision === 'override' && !body.note?.trim()) throw new HttpError(400, 'An override needs a reason');
+  const status = body.decision === 'override' && answer !== d.answer ? 'overridden' : 'accepted';
+  const updated: ModelDecision = { ...d, answer, status, step: 'human', decidedBy: actor.name, reviewNote: body.note?.trim() };
+  await q('UPDATE model_decisions SET answer = $3, status = $4, step = $5, data = $6 WHERE project_id = $1 AND id = $2', [pid, d.id, answer, status, 'human', JSON.stringify(updated)]);
+  await audit(pid, actor.name, 'user', `decision.${body.decision}`, d.id, `${answer}${body.note ? ` · ${body.note}` : ''}`);
+  await touch(pid);
+  res.json(updated);
 }));
 
 // Discovery

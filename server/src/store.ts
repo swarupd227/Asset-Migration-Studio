@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import type {
-  AgentEvent, AuditEntry, CatalogueTable, CodeRule, Dashboard, Dataset, FixProposal, LoadRun, Mapping, Person, Project, Question, Stage, ValidationFailure,
+  AgentEvent, AuditEntry, CatalogueTable, CodeRule, Dashboard, DecisionBatch, ModelDecision, Dataset, FixProposal, LoadRun, Mapping, Person, Project, Question, Stage, ValidationFailure,
 } from './types.js';
-import { one, publish, q, tx } from './db.js';
+import { bus, one, publish, q, tx } from './db.js';
 import { conceptById, ONTOLOGY_VERSION } from './data/ontology.js';
 import { conceptOf, dqSnapshot, hierarchyIssues, linkFixes, reconcile, runObjects, transform, validate } from './rules.js';
 
@@ -24,6 +24,7 @@ export const agents = [
   { id: 'remediator', name: 'Remediation Agent', job: 'Proposes fixes such as merging duplicates or classifying untyped assets.', guardrail: 'Fixes run only after approval.', icon: 'wand' },
   { id: 'reconciler', name: 'Reconciliation Agent', job: 'Compares source and target: counts, totals, hierarchy and samples.', guardrail: 'Read-only on both sides.', icon: 'scale' },
   { id: 'assistant', name: 'Review Assistant', job: 'Explains evidence, answers questions and drafts decision notes.', guardrail: 'Cannot approve anything.', icon: 'sparkles' },
+  { id: 'decision-model', name: 'Decision model', job: 'Answers typed questions on records, such as the failure mode a work order describes.', guardrail: 'Typed answers only; never sees names of people, customers or sites.', icon: 'gauge' },
   { id: 'steward', name: 'Ontology Steward', job: 'Proposes ontology additions from approved project decisions.', guardrail: 'Cannot publish ontology changes.', icon: 'book' },
 ];
 
@@ -221,11 +222,47 @@ export async function recentEvents(pid: string, limit = 60): Promise<AgentEvent[
   const rows = await q<{ id: string; ts: Date; data: Omit<AgentEvent, 'id' | 'ts'> }>('SELECT id, ts, data FROM agent_events WHERE project_id = $1 ORDER BY id DESC LIMIT $2', [pid, limit]);
   return rows.reverse().map((r) => ({ id: `ev-${r.id}`, ts: r.ts.toISOString(), ...r.data }));
 }
-export const touch = (pid: string) => publish('state', pid, { at: Date.now() });
+export const touch = (pid: string) => { stateCache.delete(pid); return publish('state', pid, { at: Date.now() }); };
+
+// ---------------- Decisions ----------------
+
+export async function getDecisions(pid: string, f: { question?: string; status?: string; step?: string; record?: string; limit?: number; offset?: number }) {
+  const where = ['project_id = $1'];
+  const params: unknown[] = [pid];
+  const add = (col: string, v?: string) => { if (v) { params.push(v); where.push(`${col} = $${params.length}`); } };
+  add('question_id', f.question); add('status', f.status); add('step', f.step); add('record_key', f.record);
+  params.push(Math.min(500, f.limit ?? 100), f.offset ?? 0);
+  const rows = await q<{ data: ModelDecision; status: string; step: string; answer: string }>(
+    `SELECT data, status, step, answer FROM model_decisions WHERE ${where.join(' AND ')} ORDER BY confidence ASC, record_key LIMIT $${params.length - 1} OFFSET $${params.length}`, params);
+  return rows.map((r) => ({ ...r.data, status: r.status, step: r.step, answer: r.answer }) as ModelDecision);
+}
+
+export async function decisionStats(pid: string) {
+  const byStep = await q<{ question_id: string; step: string; status: string; n: number; conf: number }>(
+    'SELECT question_id, step, status, count(*)::int AS n, avg(confidence)::real AS conf FROM model_decisions WHERE project_id = $1 GROUP BY question_id, step, status', [pid]);
+  const answers = await q<{ question_id: string; answer: string; n: number }>(
+    `SELECT question_id, answer, count(*)::int AS n FROM model_decisions WHERE project_id = $1 AND status <> 'needs_review' GROUP BY question_id, answer ORDER BY n DESC`, [pid]);
+  const batches = (await q<{ data: DecisionBatch }>('SELECT data FROM decision_batches WHERE project_id = $1 ORDER BY created_at DESC LIMIT 20', [pid])).map((r) => r.data);
+  return { byStep, answers, batches };
+}
 
 // ---------------- Derived project state ----------------
 
-export async function projectState(pid: string) {
+// Derived project state is memoised per project and dropped on every change notification,
+// which every replica receives through LISTEN/NOTIFY.
+const stateCache = new Map<string, { at: number; value: Promise<Awaited<ReturnType<typeof computeState>>> }>();
+bus.on('state', (pid: string) => stateCache.delete(pid));
+
+export function projectState(pid: string) {
+  const hit = stateCache.get(pid);
+  if (hit && Date.now() - hit.at < 60_000) return hit.value;
+  const value = computeState(pid);
+  stateCache.set(pid, { at: Date.now(), value });
+  value.catch(() => stateCache.delete(pid));
+  return value;
+}
+
+async function computeState(pid: string) {
   const [raw, fixes, mappings] = await Promise.all([loadDataset(pid), getFixes(pid), getMappings(pid)]);
   const rawFailures = validate(raw);
   const cur = transform(raw, fixes, mappings);
@@ -244,7 +281,10 @@ export async function quality(pid: string) {
 
 export async function buildRun(pid: string, number: number): Promise<LoadRun> {
   const s = await projectState(pid);
-  const objects = runObjects(s.raw, s.cur, s.curFailures, { history: 8068, attrs: s.cur.assets.reduce((n, a) => n + Object.keys(a.specs).length, 0) });
+  // History older than five years is summarised, not loaded record by record (BR-01).
+  const woRows = (await getCatalogue(pid)).find((t) => t.name === 'WORKORDER')?.rows ?? 0;
+  const older = Math.max(0, woRows - s.raw.workOrders.length);
+  const objects = runObjects(s.raw, s.cur, s.curFailures, { history: older, attrs: s.cur.assets.reduce((n, a) => n + Object.keys(a.specs).length, 0) });
   const byRule = new Map<string, number>();
   for (const f of s.curFailures) byRule.set(f.rule, (byRule.get(f.rule) ?? 0) + 1);
   return {
@@ -278,6 +318,8 @@ export async function dashboard(pid: string): Promise<Dashboard & { running: num
   if (fx.length) needsYou.push({ id: 'n-fx', title: `${fx.length} data fixes awaiting approval`, detail: `${fx.filter((f) => f.kind === 'merge_duplicate').length} duplicate merges · ${fx.filter((f) => f.kind === 'reparent').length} re-parents · ${fx.filter((f) => f.kind === 'classify').length} classifications`, href: '/quality', role: 'Data subject expert', severity: 'medium' });
   const cr = codeRules.filter((r) => r.status === 'proposed');
   if (cr.length) needsYou.push({ id: 'n-cr', title: `${cr.length} business rules found in custom code to confirm`, detail: cr.map((r) => r.id).join(', '), href: '/discovery?tab=rules', role: 'Migration lead', severity: 'low' });
+  const review = (await one<{ n: number }>(`SELECT count(*)::int AS n FROM model_decisions WHERE project_id = $1 AND status = 'needs_review'`, [pid]))?.n ?? 0;
+  if (review) needsYou.push({ id: 'n-dec', title: `${review.toLocaleString('en-GB')} work-order tags need a person`, detail: 'Low confidence or the two models disagree', href: '/decisions?status=needs_review', role: 'Data subject expert', severity: 'medium' });
   const quick = mappings.filter((m) => m.path === 'quick' && open(m));
   if (quick.length) needsYou.push({ id: 'n-quick', title: `${quick.length} mappings ready for quick review`, detail: 'Strong evidence; approve or change', href: '/review?path=quick', role: 'Data subject expert', severity: 'low' });
   const sample = mappings.filter((m) => m.path === 'auto' && m.sampled && m.status === 'auto_accepted');
@@ -297,7 +339,7 @@ export async function dashboard(pid: string): Promise<Dashboard & { running: num
       pendingReview: mappings.filter(open).length + sample.length,
       precedentShare: mappings.length ? mappings.filter((m) => m.precedents.some((p) => p.outcome === 'approved')).length / mappings.length : 0,
       dqBefore: q2.dq.overallBefore, dqAfter: q2.dq.overallAfter,
-      assets: assetsCount, workOrders: woCount + (pid === 'nvwp-mx-ifs' ? 15020 : 0),
+      assets: assetsCount, workOrders: Math.max(woCount, (await getCatalogue(pid)).find((t) => t.name === 'WORKORDER')?.rows ?? 0),
       hiddenRules: codeRules.length, fixesPending: fx.length,
     },
     needsYou,
@@ -337,10 +379,20 @@ export async function aiReadyAsset(pid: string, num?: string) {
     allowedParents: (c?.allowedParents ?? []).map((p) => conceptById.get(p)?.label),
     measurements: meter ? [{ parameter: 'Runtime hours', concept: 'util:RuntimeHours', cumulative: true, lastValue: meter.readings.at(-1)!.value, unit: 'h', lastRead: meter.readings.at(-1)!.date }] : [],
     maintenance: { pmActions: s.cur.pms.filter((p) => p.assetnum === a.assetnum).map((p) => ({ id: p.pmnum, name: p.description, trigger: p.frequnit === 'HOURS' ? `meter · ${p.frequency} h` : `calendar · ${p.frequency} ${p.frequnit.toLowerCase()}` })) },
+    failureHistory: await failureHistory(pid, wos.map((w) => w.wonum)),
     workHistory: {
-      openWorkOrders: wos.length,
+      openWorkOrders: wos.filter((w) => !['CLOSE', 'COMP'].includes(w.status)).length,
+      closedLast5Years: wos.filter((w) => ['CLOSE', 'COMP'].includes(w.status)).length,
       topFailureModes: [...wos.reduce((m, w) => (w.failurecode ? m.set(w.failurecode, (m.get(w.failurecode) ?? 0) + 1) : m), new Map<string, number>())].map(([code, count]) => ({ code, count })),
     },
     provenance: { source: `Maximo 7.6 · ASSET/${a.assetnum}`, mappings: ['M-001', 'M-002', 'M-005', 'M-009', 'M-010', 'M-020', 'M-021', 'M-022'], loadRun: runs.at(-1)?.id, transformation: runs.at(-1)?.transformationVersion },
   };
+}
+
+async function failureHistory(pid: string, wonums: string[]) {
+  if (!wonums.length) return [];
+  const rows = await q<{ answer: string; n: number; conf: number; review: number }>(
+    `SELECT answer, count(*)::int AS n, avg(confidence)::real AS conf, count(*) FILTER (WHERE status = 'needs_review')::int AS review
+     FROM model_decisions WHERE project_id = $1 AND question_id = 'wo.failure_mode' AND record_key = ANY($2) GROUP BY answer ORDER BY n DESC`, [pid, wonums]);
+  return rows.map((r) => ({ mode: r.answer, code: r.answer.match(/\((\w+)\)/)?.[1] ?? null, count: r.n, confidence: Math.round(r.conf * 100) / 100, needsReview: r.review }));
 }

@@ -1,18 +1,18 @@
 import {
-  BarChart3, BookOpen, Database, FileCode2, GitBranch, Hammer, LayoutTemplate, Link2, List, Scale, ShieldCheck, Sparkles, Wand2, Workflow,
+  BarChart3, BookOpen, Database, Gauge, FileCode2, GitBranch, Hammer, LayoutTemplate, Link2, List, Scale, ShieldCheck, Sparkles, Wand2, Workflow,
   type LucideIcon,
 } from 'lucide-react';
 import { cx } from './ui';
 
 export const agentIcon: Record<string, LucideIcon> = {
   orchestrator: Workflow, harvester: Database, profiler: BarChart3, 'code-reader': FileCode2, aligner: Link2, 'target-designer': LayoutTemplate,
-  hierarchy: GitBranch, 'code-list': List, builder: Hammer, validator: ShieldCheck, remediator: Wand2, reconciler: Scale, assistant: Sparkles, steward: BookOpen,
+  hierarchy: GitBranch, 'code-list': List, builder: Hammer, validator: ShieldCheck, remediator: Wand2, reconciler: Scale, assistant: Sparkles, steward: BookOpen, 'decision-model': Gauge,
 };
 
 export const agentName: Record<string, string> = {
   orchestrator: 'Orchestrator', harvester: 'Metadata Harvester', profiler: 'Profiler', 'code-reader': 'Code Reader', aligner: 'Concept Aligner',
   'target-designer': 'Target Designer', hierarchy: 'Hierarchy Agent', 'code-list': 'Code List Agent', builder: 'Transformation Builder',
-  validator: 'Validation Agent', remediator: 'Remediation Agent', reconciler: 'Reconciliation Agent', assistant: 'Review Assistant', steward: 'Ontology Steward',
+  validator: 'Validation Agent', remediator: 'Remediation Agent', reconciler: 'Reconciliation Agent', assistant: 'Review Assistant', steward: 'Ontology Steward', 'decision-model': 'Decision model',
 };
 
 export function AgentAvatar({ id, size = 'md', active }: { id: string; size?: 'sm' | 'md' | 'lg'; active?: boolean }) {

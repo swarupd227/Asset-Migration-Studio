@@ -5,6 +5,7 @@ import {
   runSignable, setStage, touch, updateProject, upsertFixes,
 } from '../store.js';
 import { alignProject } from './aligner.js';
+import { runQuestion } from '../decisions/flow.js';
 import { ONTOLOGY_VERSION } from '../data/ontology.js';
 import { proposeFixes, validate } from '../rules.js';
 
@@ -120,6 +121,11 @@ export async function runStage(pid: string, n: number, actor: string) {
   try {
     if (n >= 8 && n <= 11) {
       for (const k of [8, 9, 10, 11].filter((k) => k >= n)) {
+        if (k === 8) {
+          // Tag work history before building: reruns answer from the decision cache.
+          await setStage(pid, 8, { status: 'running', started: true });
+          await runQuestion(pid, 'wo.failure_mode', 'decision-model');
+        }
         if (k === 10) {
           // The Remediation Agent proposes fixes for anything the raw data still breaks.
           const raw = await loadDataset(pid);

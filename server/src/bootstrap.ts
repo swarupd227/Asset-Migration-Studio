@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import type { Project, Question } from './types.js';
 import { migrate, one, q } from './db.js';
 import { INDUSTRY_PACK, ONTOLOGY_VERSION } from './data/ontology.js';
-import { assets, locations, meters, people, pmPlans, workOrders } from './data/seed.js';
+import { assets, closedWorkOrders, locations, meters, people, pmPlans, workOrders } from './data/seed.js';
 import { buildMappings, catalogue, codeRules } from './data/catalog.js';
 import { proposeFixes, validate } from './rules.js';
 import { addRun, audit, buildRun, getProject, insertRecords, loadDataset, putItems, setStage, STAGES } from './store.js';
@@ -60,7 +60,7 @@ async function seedNorthvale() {
   await insertRecords(pid, [
     ...locations.map((l) => ({ kind: 'location', key: l.location, data: l })),
     ...assets.map((a) => ({ kind: 'asset', key: a.assetnum, data: a })),
-    ...workOrders.map((w) => ({ kind: 'workorder', key: w.wonum, data: w })),
+    ...[...workOrders, ...closedWorkOrders].map((w) => ({ kind: 'workorder', key: w.wonum, data: w })),
     ...pmPlans.map((p) => ({ kind: 'pm', key: p.pmnum, data: p })),
     ...meters.map((m) => ({ kind: 'meter', key: `${m.assetnum}:${m.metername}`, data: m })),
   ]);
@@ -133,6 +133,17 @@ export async function bootstrap() {
   }
   const hasProjects = await one<{ n: number }>('SELECT count(*)::int AS n FROM projects');
   if (!hasProjects?.n) await seedNorthvale();
+  else await backfillClosedHistory();
+}
+
+/** Projects loaded before closed history was part of the Northvale extract get it added once. */
+async function backfillClosedHistory() {
+  const pid = 'nvwp-mx-ifs';
+  const n = await one<{ n: number }>(`SELECT count(*)::int AS n FROM source_records WHERE project_id = $1 AND kind = 'workorder' AND data->>'status' IN ('CLOSE', 'COMP')`, [pid]);
+  const exists = await one<{ id: string }>('SELECT id FROM projects WHERE id = $1', [pid]);
+  if (!exists || (n?.n ?? 0) > 0) return;
+  await insertRecords(pid, closedWorkOrders.map((w) => ({ kind: 'workorder', key: w.wonum, data: w })));
+  await audit(pid, 'system', 'system', 'extract.backfill', 'WORKORDER', `${closedWorkOrders.length.toLocaleString('en-GB')} closed work orders (five years) loaded`);
 }
 
 /** Removes the Northvale project and loads it again from its extract (admin operation). */

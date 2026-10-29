@@ -1,5 +1,5 @@
 import {
-  Bot, BookOpenText, BrainCircuit, CheckCheck, FileCheck2, GitFork, Inbox, LayoutDashboard, Network, PlugZap, ScanSearch, ScrollText, ShieldAlert, Sparkle,
+  Bot, BookOpenText, Gauge, BrainCircuit, CheckCheck, FileCheck2, GitFork, Inbox, LayoutDashboard, Network, PlugZap, ScanSearch, ScrollText, ShieldAlert, Sparkle,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -20,6 +20,7 @@ export const navGroups: { label: string; items: NavItem[] }[] = [
     label: 'Decide',
     items: [
       { to: '/review', label: 'Review queue', icon: Inbox, hint: 'Approve, reject or change, riskiest first', stage: 7, badge: 'review' },
+      { to: '/decisions', label: 'Bulk decisions', icon: Gauge, hint: 'Typed decisions on records: rules, model, reasoning, people', stage: 8 },
       { to: '/validation', label: 'Validation', icon: ShieldAlert, hint: 'Semantic rule failures in plain language', stage: 10, badge: 'validation' },
       { to: '/quality', label: 'Data quality', icon: CheckCheck, hint: 'Score before and after, fix proposals', stage: 10, badge: 'quality' },
     ],

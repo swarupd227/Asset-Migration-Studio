@@ -414,3 +414,56 @@ export interface Dashboard {
   };
   needsYou: { id: string; title: string; detail: string; href: string; role: string; severity: 'high' | 'medium' | 'low' }[];
 }
+
+// ---------------- Decision layer ----------------
+
+export type DecisionStep = 'rule' | 'model' | 'reasoning' | 'human';
+export type DecisionStatus = 'accepted' | 'needs_review' | 'overridden';
+
+export interface ModelDecision {
+  id: string;
+  questionId: string;
+  recordKind: string;
+  recordKey: string;
+  inputHash: string;
+  /** The masked text the model saw. */
+  input: string;
+  context: Record<string, string>;
+  options: string[];
+  answer: string;
+  probabilities: Record<string, number>;
+  confidence: number;
+  step: DecisionStep;
+  status: DecisionStatus;
+  model: string;
+  modelVersion: string;
+  ontologyVersion: string;
+  /** Answer of the reasoning model when it checked this record, and why. */
+  reasoning?: { answer: string; explanation: string; model: string };
+  sampled?: boolean;
+  decidedBy?: string;
+  reviewNote?: string;
+  createdAt: string;
+}
+
+export interface DecisionBatch {
+  id: string;
+  questionId: string;
+  model: string;
+  reasoningModel: string;
+  startedAt: string;
+  finishedAt: string;
+  counts: { records: number; unique: number; cacheHits: number; modelCalls: number; rule: number; model: number; reasoning: number; human: number; sampled: number };
+  tokens: number;
+  costUsd: number;
+  ms: number;
+}
+
+export interface DecisionQuestionInfo {
+  id: string;
+  label: string;
+  kind: 'choice' | 'score' | 'yesno';
+  recordKind: string;
+  fields: string[];
+  description: string;
+}

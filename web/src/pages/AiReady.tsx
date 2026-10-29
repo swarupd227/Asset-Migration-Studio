@@ -18,6 +18,7 @@ interface AiAsset {
   allowedParents: (string | undefined)[];
   measurements: { parameter: string; concept: string; cumulative: boolean; lastValue: number; unit: string; lastRead: string }[];
   maintenance: { pmActions: { id: string; name: string; trigger: string }[] };
+  failureHistory?: { mode: string; code: string | null; count: number; confidence: number; needsReview: number }[];
   workHistory: { openWorkOrders: number; closedLast5Years?: number; topFailureModes?: { code: string; count: number }[]; meanTimeBetweenFailuresDays?: number };
   provenance: { source: string; mappings: string[]; loadRun?: string; transformation?: string };
 }
@@ -163,6 +164,17 @@ export default function AiReady() {
               <Row k="Open work orders" v={a.workHistory.openWorkOrders} />
               {a.workHistory.closedLast5Years !== undefined && <Row k="Closed, last 5 years" v={a.workHistory.closedLast5Years} />}
               {a.workHistory.meanTimeBetweenFailuresDays !== undefined && <Row k="Mean time between failures" v={`${a.workHistory.meanTimeBetweenFailuresDays} days`} />}
+              {!!a.failureHistory?.length && (
+                <div className="mt-2 space-y-1">
+                  <div className="text-[11px] font-medium text-ink-3">Failure modes tagged in work history</div>
+                  {a.failureHistory.map((f) => (
+                    <div key={f.mode} className="flex items-center justify-between gap-2 text-[12px]">
+                      <span className="truncate text-ink-2">{f.code ? <b className="mr-1 font-mono text-[11px] text-ink">{f.code}</b> : null}{f.mode.replace(/\s*\(\w+\)/, '')}</span>
+                      <span className="shrink-0 tabular text-ink-3">{f.count} · {f.confidence.toFixed(2)}{f.needsReview ? ` · ${f.needsReview} to review` : ''}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {!!a.workHistory.topFailureModes?.length && (
                 <div className="mt-1.5 flex gap-1.5">
                   {a.workHistory.topFailureModes.map((f) => <Badge key={f.code} tone="neutral"><History className="size-3" />{f.code} × {f.count}</Badge>)}

@@ -44,6 +44,7 @@ export function inferConcept(a: SourceAsset): string | undefined {
   return order.find(([re]) => re.test(d))?.[1];
 }
 
+export const isClosed = (w: { status: string }) => w.status === 'CLOSE' || w.status === 'COMP';
 const normSerial = (s?: string) => (s ?? '').toUpperCase().replace(/\s/g, '');
 const twoYearsAgo = () => new Date(Date.now() - 2 * 365 * 86400_000).toISOString().slice(0, 10);
 const label = (cid?: string) => (cid ? conceptById.get(cid)?.label ?? cid : 'unclassified');
@@ -339,13 +340,17 @@ export function hierarchyTree(ds: Dataset, siteId: string, siteName: string, fai
 
 export function runObjects(raw: Dataset, cur: Dataset, failures: ValidationFailure[], extra: { history: number; attrs: number }) {
   const errorRecords = (object: string) => new Set(failures.filter((f) => f.severity === 'error' && f.object === object).map((f) => f.record)).size;
+  const closedKeys = new Set(cur.workOrders.filter(isClosed).map((w) => w.wonum));
+  const errorRecordsWhere = (object: string, keep: (record: string) => boolean) =>
+    new Set(failures.filter((f) => f.severity === 'error' && f.object === object && keep(f.record)).map((f) => f.record)).size;
   const rows = [
     { object: 'Functional objects', ifsTarget: 'EquipmentFunctional', source: cur.locations.length, failed: errorRecords('Functional object') },
     { object: 'Serial objects', ifsTarget: 'EquipmentSerial', source: cur.assets.length, failed: errorRecords('Serial object') },
     { object: 'Technical attributes', ifsTarget: 'TechnicalAttribute', source: extra.attrs, failed: 0 },
     { object: 'PM actions', ifsTarget: 'PmAction', source: cur.pms.length, failed: errorRecords('PM action') },
-    { object: 'Open work orders', ifsTarget: 'WorkOrder', source: cur.workOrders.length, failed: errorRecords('Work order') },
-    { object: 'Work history (summarised)', ifsTarget: 'Historical work', source: extra.history, failed: 0 },
+    { object: 'Open work orders', ifsTarget: 'WorkOrder', source: cur.workOrders.filter((w) => !isClosed(w)).length, failed: errorRecordsWhere('Work order', (r) => !closedKeys.has(r)) },
+    { object: 'Work history (closed, 5 years)', ifsTarget: 'Historical work order', source: cur.workOrders.filter(isClosed).length, failed: errorRecordsWhere('Work order', (r) => closedKeys.has(r)) },
+    ...(extra.history ? [{ object: 'Older history (summarised)', ifsTarget: 'Historical work summary', source: extra.history, failed: 0 }] : []),
     { object: 'Measurements', ifsTarget: 'Measurement', source: cur.meters.reduce((s, m) => s + m.readings.length, 0), failed: errorRecords('Measurement') },
   ];
   void raw;

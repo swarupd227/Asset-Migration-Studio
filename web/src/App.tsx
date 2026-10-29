@@ -17,6 +17,7 @@ import Memory from '@/pages/Memory';
 import Agents from '@/pages/Agents';
 import Projects from '@/pages/Projects';
 import NewProject from '@/pages/NewProject';
+import Decisions from '@/pages/Decisions';
 
 export function App() {
   return (
@@ -32,6 +33,7 @@ export function App() {
             <Route path="alignment" element={<Alignment />} />
             <Route path="hierarchy" element={<Hierarchy />} />
             <Route path="review" element={<Review />} />
+            <Route path="decisions" element={<Decisions />} />
             <Route path="validation" element={<Validation />} />
             <Route path="quality" element={<Quality />} />
             <Route path="ai-ready" element={<AiReady />} />
