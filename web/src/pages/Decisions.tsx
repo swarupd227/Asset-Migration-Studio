@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { Check, Cpu, Gauge, Hand, Play, Sparkles, SquareFunction, Timer, UserRound } from 'lucide-react';
+import { Check, Cpu, Gauge, GraduationCap, Hand, Play, Sparkles, SquareFunction, Timer, UserRound } from 'lucide-react';
 import type { DecisionBatch, DecisionQuestionInfo, ModelDecision } from '@shared/types';
 import { useApi, useApp } from '@/lib/app';
 import { api } from '@/lib/api';
@@ -13,6 +13,49 @@ interface Stats {
   byStep: { question_id: string; step: string; status: string; n: number; conf: number }[];
   answers: { question_id: string; answer: string; n: number }[];
   batches: DecisionBatch[];
+}
+
+interface TrainedInfo {
+  minExamples: number;
+  questions: { id: string; label: string; labels: number; active: TrainedVersion | null; latest: TrainedVersion | null }[];
+}
+interface TrainedVersion { version: number; active: boolean; trainedBy: string; trainedAt: string; data: { examples: { total: number; person: number; reasoning: number }; holdout: { n: number; accuracy: number; baseAccuracy: number } } }
+
+/** The project's in-environment model: trained on decided records, used only where it beats keyword evidence. */
+function TrainedModels({ busy }: { busy: boolean }) {
+  const { persona, act } = useApp();
+  const { data } = useApi<TrainedInfo>('/decisions/trained');
+  if (!data) return <Skeleton className="h-40" />;
+  const canTrain = persona && ['Migration lead', 'Data subject expert'].includes(persona.role);
+  const ready = data.questions.filter((x) => x.labels >= data.minExamples).length;
+  return (
+    <Card className="mt-5">
+      <CardHeader title="In-environment model" icon={GraduationCap}
+        subtitle={`Learns from records people decided or the reasoning model confirmed, and runs inside the platform with no external calls. A version is used only when it gets at least 75% of held-out records right and does no worse than keyword evidence.`}
+        right={<Button size="sm" icon={GraduationCap} disabled={!canTrain || busy || !ready} title={!canTrain ? 'Migration leads and data subject experts train the model' : !ready ? `Each question needs ${data.minExamples} decided records` : undefined}
+          onClick={() => persona && act(() => api.post('/decisions/train', { question: 'all', actor: persona.id }), 'Training queued')}>Train now</Button>} />
+      <div className="divide-y divide-line rounded-lg border border-line">
+        {data.questions.map((x) => {
+          const v = x.active ?? x.latest;
+          return (
+            <div key={x.id} className="grid grid-cols-1 items-center gap-1.5 px-3 py-2 text-[12.5px] sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.4fr)] sm:gap-3">
+              <span className="truncate font-medium">{x.label}</span>
+              <div>
+                <div className="mb-0.5 text-[11px] tabular text-ink-3">{num(x.labels)} / {data.minExamples} decided records</div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-sunken"><div className={cx('h-full rounded-full', x.labels >= data.minExamples ? 'bg-ok' : 'bg-ink-4')} style={{ width: `${Math.min(1, x.labels / data.minExamples) * 100}%` }} /></div>
+              </div>
+              <span className="flex items-center gap-2 text-[11.5px] text-ink-3 sm:justify-end">
+                {v ? <>
+                  <span className="tabular">{pct(v.data.holdout.accuracy, 0)} held-out · keywords {pct(v.data.holdout.baseAccuracy, 0)}</span>
+                  <Badge tone={x.active ? 'ok' : 'neutral'}>{x.active ? `v${x.active.version} in use` : `v${v.version} not used`}</Badge>
+                </> : <span>Keyword evidence</span>}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
 }
 
 const STEPS = [
@@ -111,7 +154,7 @@ export default function Decisions() {
   const answers = (stats?.answers ?? []).filter((a) => a.question_id === question).slice(0, 8);
   const maxAnswer = Math.max(1, ...answers.map((a) => a.n));
   const canRun = persona && ['Migration lead', 'Data subject expert'].includes(persona.role);
-  const run = (id: string) => persona && act(() => api.post('/decisions/run', { question: id, actor: persona.id }), id === 'all' ? 'All decision batches started' : 'Decision batch started');
+  const run = (id: string) => persona && act(() => api.post('/decisions/run', { question: id, actor: persona.id }), id === 'all' ? 'All decision batches queued' : 'Decision batch queued');
   const setModel = (model: string) => persona && act(() => api.post('/decisions/settings', { model, actor: persona.id }), 'Decision model updated');
   const pickQuestion = (id: string) => { const p = new URLSearchParams(params); p.set('question', id); setParams(p); };
   const totals = (id: string) => (stats?.byStep ?? []).filter((r) => r.question_id === id);
@@ -131,8 +174,8 @@ export default function Decisions() {
             <option value="local">In-environment model only</option>
             <option value="off">Off: rules and people only</option>
           </select>
-          <Button icon={Play} disabled={!canRun || !!dashboard?.running} onClick={() => run(question)} title={canRun ? undefined : 'Migration leads and data subject experts run decision batches'}>Run this question</Button>
-          <Button variant="agent" icon={Play} disabled={!canRun || !!dashboard?.running} onClick={() => run('all')}>Run all questions</Button>
+          <Button icon={Play} disabled={!canRun || !!dashboard?.running || !!dashboard?.job} onClick={() => run(question)} title={canRun ? undefined : 'Migration leads and data subject experts run decision batches'}>Run this question</Button>
+          <Button variant="agent" icon={Play} disabled={!canRun || !!dashboard?.running || !!dashboard?.job} onClick={() => run('all')}>Run all questions</Button>
         </>}
       />
 
@@ -179,6 +222,8 @@ export default function Decisions() {
           ) : <Empty icon={Timer} title="No batches yet" />}
         </Card>
       </div>
+
+      <TrainedModels busy={!!dashboard?.running || !!dashboard?.job} />
 
       {answers.length > 0 && (
         <Card className="mt-5">

@@ -21,6 +21,9 @@ Open http://localhost:5173. On first start the API creates the schema and loads 
 | `DATABASE_URL` | PostgreSQL connection string | `postgres://ams:ams@localhost:5433/ams` |
 | `ANTHROPIC_API_KEY` | Enables the Review Assistant and model-based concept alignment | unset: assistant answers from project data; unknown fields go to expert review |
 | `AMS_MODEL` | Model for agents and the assistant | `claude-opus-5-5` |
+| `AMS_DECISION_MODEL` | Decision model when external models are on | `claude-haiku-5-5` |
+| `AMS_WORKER` | `off` runs the API without a background worker | on |
+| `AMS_WORKER_CONCURRENCY` | Jobs one worker runs at once (one per project) | `2` |
 | `PORT` | API port | `8791` |
 | `ALLOW_REFERENCE_RELOAD` | Allows `POST /api/admin/reload-reference` to reload the Northvale project | unset (disabled) |
 
@@ -50,6 +53,11 @@ server/   Express + TypeScript API, PostgreSQL
   src/rules.ts       rule catalogue, transformations, fix proposals, data quality, reconciliation
   src/extracts.ts    CSV parsing, column profiling, record loading
   src/agents/        orchestrator, Concept Aligner, Review Assistant
+  src/decisions/     typed decisions: rules, decision model, reasoning model, people; trained in-environment model
+  src/learning/      skill library, triggers, curator flow
+  src/evals/         golden datasets and the release gate
+  src/jobs.ts        background job queue and worker
+  src/usage.ts       model call tracking, cost and budgets
   src/bootstrap.ts   schema, users and the Northvale reference project
 web/      React 19 + Vite + Tailwind v4
 ```
@@ -57,6 +65,9 @@ web/      React 19 + Vite + Tailwind v4
 - Every table is scoped by project; nested objects are JSONB next to the columns that are filtered on.
 - The audit log is append-only (a trigger rejects UPDATE and DELETE) and hash-chained per project.
 - Agent activity and change notifications go through PostgreSQL LISTEN/NOTIFY, so any replica can serve the live stream.
+- Stage runs, decision batches and model training are jobs in PostgreSQL. Every replica's worker claims them with `FOR UPDATE SKIP LOCKED`; a project runs one job at a time, and a job whose replica stops is queued again.
+- Every external model call is recorded with tokens, cost and latency by project, agent and stage. A project's monthly budget stops external calls once used; work continues on the in-environment model.
+- The in-environment decision model learns from records people decided or the reasoning model confirmed. A trained version is used only when it gets at least 75% of held-out records right and does no worse than keyword evidence; guardrail questions are never trained.
 - Source data is passed to the model inside `<project_data>` and treated as data, never as instructions.
 
 ## Deploying to Azure

@@ -11,7 +11,9 @@ import { q } from '../db.js';
 import { evaluateLater } from '../learning/engine.js';
 import { getProject } from '../store.js';
 import { runQuestions } from '../decisions/flow.js';
-import { questionsForStage } from '../decisions/questions.js';
+import { questionsForStage, RUN_ORDER } from '../decisions/questions.js';
+import { trainProject } from '../decisions/trained.js';
+import { localDecisionModel } from '../decisions/adapters/local.js';
 import { decisionInputs } from '../store.js';
 import { ONTOLOGY_VERSION } from '../data/ontology.js';
 import { proposeFixes, validate } from '../rules.js';
@@ -163,13 +165,10 @@ async function play(pid: string, n: number) {
   await setStage(pid, n, { status: 'done', finished: true });
 }
 
-const running = new Set<string>();
-
+/** Runs a stage. Called by the job worker, which runs one job per project at a time. */
 export async function runStage(pid: string, n: number, actor: string) {
-  if (running.has(pid)) throw new Error('Another stage is running');
   const hasData = await one<{ n: number }>(`SELECT count(*)::int AS n FROM source_records WHERE project_id = $1`, [pid]);
   if (n >= 2 && !hasData?.n) throw new Error('Upload a source extract or connect a source system first');
-  running.add(pid);
   await audit(pid, actor, 'user', 'stage.run', `Stage ${n}`);
   try {
     if (n >= 8 && n <= 11) {
@@ -204,6 +203,8 @@ export async function runStage(pid: string, n: number, actor: string) {
         await putItems(pid, 'mapping', proposed);
         await audit(pid, 'aligner', 'agent', 'alignment.propose', `${proposed.length} mappings`);
       }
+      // Learn: retrain the in-environment decision model on what people decided in this project.
+      if (n === 14) await trainProject(pid, localDecisionModel, 'steward', RUN_ORDER);
       await play(pid, n);
       // Screening (stage 2) and review risk, precedent relevance and code lists (stage 5).
       if (n === 2 || n === 5) {
@@ -215,7 +216,6 @@ export async function runStage(pid: string, n: number, actor: string) {
       if (n === 13) { await updateProject(pid, { status: 'Live in IFS Cloud' }); await setStage(pid, 14, { status: 'ready' }); }
     }
   } finally {
-    running.delete(pid);
     await touch(pid);
   }
 }

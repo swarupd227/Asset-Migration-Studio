@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { AgentDef, AgentEvent, Dashboard, Person, Project, Rule, Site } from '@shared/types';
+import type { ActiveJob, AgentDef, AgentEvent, Dashboard, Person, Project, Rule, Site } from '@shared/types';
 import { api, ApiError, setApiProject } from './api';
 
 export interface Meta {
@@ -13,7 +13,7 @@ export interface Meta {
   industryPack: string;
 }
 
-export type DashboardData = Dashboard & { running: number | null };
+export type DashboardData = Dashboard & { running: number | null; job: ActiveJob | null };
 export type ProjectSummary = Project & { stagesDone: number; pendingReview: number; records: number };
 
 interface Toast { id: number; kind: 'ok' | 'error' | 'info'; text: string }

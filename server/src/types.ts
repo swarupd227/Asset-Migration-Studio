@@ -402,6 +402,9 @@ export interface DqSnapshot {
   bySite: { site: string; before: number; after: number }[];
 }
 
+/** The queued or running background job of a project. */
+export interface ActiveJob { id: string; label: string; status: 'queued' | 'running'; requestedBy: string; createdAt: string; startedAt: string | null }
+
 export interface Dashboard {
   project: Project;
   stages: Stage[];

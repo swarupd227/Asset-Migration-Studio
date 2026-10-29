@@ -30,6 +30,10 @@ import { datasets, limitsFor, listEvals, recordEval, RELEASE } from './evals/sto
 import { runEval } from './evals/run.js';
 import { helped, proposeForSharing, publishLibrary, ShareError, sharedSkills, testCandidate } from './learning/share.js';
 import type { CodeRule, Mapping, Person, Question } from './types.js';
+import { activeJob, enqueue, handle, JobConflict, listJobs, onJobFailed, startWorker, stopWorker, type JobKind } from './jobs.js';
+import { budgetReached, monthSpend, usageSummary } from './usage.js';
+import { MIN_EXAMPLES, labels, trainable, trainedModels, trainProject } from './decisions/trained.js';
+import { localDecisionModel } from './decisions/adapters/local.js';
 
 const app = express();
 const production = process.env.NODE_ENV === 'production';
@@ -202,6 +206,16 @@ app.use('/api/projects/:pid', (req: Request, res: Response, next: NextFunction) 
   getProject(String(req.params.pid)).then((x) => (x ? next() : res.status(404).json({ error: 'Project not found' }))).catch(next);
 }, p);
 const pidOf = (req: Request) => String(req.params.pid);
+async function queue(pid: string, kind: JobKind, payload: Record<string, unknown>, by: string) {
+  try {
+    const job = await enqueue(pid, kind, payload, by);
+    await touch(pid);
+    return job;
+  } catch (e) {
+    if (e instanceof JobConflict) throw new HttpError(409, e.message);
+    throw e;
+  }
+}
 
 p.get('/dashboard', wrap(async (req, res) => res.json(await dashboard(pidOf(req)))));
 
@@ -215,8 +229,7 @@ p.post('/stages/:n/run', wrap(async (req, res) => {
   if (stage.status === 'running') throw new HttpError(409, 'Stage is already running');
   const hasData = await one<{ n: number }>(`SELECT count(*)::int AS n FROM source_records WHERE project_id = $1`, [pid]);
   if (n >= 2 && !hasData?.n) throw new HttpError(400, 'Upload a source extract or connect a source system first');
-  runStage(pid, n, actor.name).catch((e) => emitAgent(pid, { agent: 'orchestrator', kind: 'error', text: String(e?.message ?? e) }));
-  res.status(202).json({ ok: true });
+  res.status(202).json({ ok: true, job: await queue(pid, 'stage.run', { n, actor: actor.name }, actor.name) });
 }));
 
 // Extracts (CSV with a header row; the table is taken from ?table or the file name)
@@ -278,7 +291,6 @@ p.get('/decisions', wrap(async (req, res) => {
   const s = (k: string) => (req.query[k] ? String(req.query[k]) : undefined);
   res.json(await getDecisions(pidOf(req), { question: s('question'), status: s('status'), step: s('step'), record: s('record'), limit: Number(req.query.limit ?? 100), offset: Number(req.query.offset ?? 0) }));
 }));
-const running = new Set<string>();
 p.post('/decisions/run', wrap(async (req, res) => {
   const pid = pidOf(req);
   const body = parse(z.object({ question: z.string(), actor: z.string() }), req.body);
@@ -286,12 +298,45 @@ p.post('/decisions/run', wrap(async (req, res) => {
   if (!['Migration lead', 'Data subject expert'].includes(actor.role)) throw new HttpError(403, 'Migration leads and data subject experts run decision batches');
   const ids = body.question === 'all' ? RUN_ORDER : [body.question];
   if (!ids.every((id) => QUESTIONS.some((x) => x.id === id))) throw new HttpError(404, 'Unknown question');
-  if (running.has(pid)) throw new HttpError(409, 'A decision batch is already running');
-  running.add(pid);
-  runQuestions(pid, ids, actor.name)
-    .catch((e) => emitAgent(pid, { agent: 'decision-model', kind: 'error', text: String(e?.message ?? e) }))
-    .finally(() => { running.delete(pid); touch(pid); });
-  res.status(202).json({ ok: true });
+  res.status(202).json({ ok: true, job: await queue(pid, 'decisions.run', { ids, actor: actor.name }, actor.name) });
+}));
+// In-environment decision model trained on this project's decided records.
+p.get('/decisions/trained', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const models = await trainedModels(pid);
+  const questions = await Promise.all(RUN_ORDER.filter(trainable).map(async (id) => {
+    const qq = QUESTIONS.find((x) => x.id === id)!;
+    const versions = models.filter((m) => m.questionId === id);
+    return { id, label: qq.label, labels: (await labels(pid, id)).length, active: versions.find((m) => m.active) ?? null, latest: versions[0] ?? null };
+  }));
+  res.json({ minExamples: MIN_EXAMPLES, questions });
+}));
+p.post('/decisions/train', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const body = parse(z.object({ question: z.string(), actor: z.string() }), req.body);
+  const actor = await actorOf(req);
+  if (!['Migration lead', 'Data subject expert'].includes(actor.role)) throw new HttpError(403, 'Migration leads and data subject experts train the in-environment model');
+  const ids = body.question === 'all' ? RUN_ORDER.filter(trainable) : [body.question];
+  if (!ids.every((id) => QUESTIONS.some((x) => x.id === id) && trainable(id))) throw new HttpError(400, 'This question is not trained');
+  res.status(202).json({ ok: true, job: await queue(pid, 'decisions.train', { ids, actor: actor.name }, actor.name) });
+}));
+
+// Background work and model usage.
+p.get('/jobs', wrap(async (req, res) => res.json(await listJobs(pidOf(req)))));
+p.get('/usage', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const days = Math.min(365, Math.max(1, Number(req.query.days ?? 30)));
+  res.json({ ...(await usageSummary(pid, days)), days, monthUsd: await monthSpend(pid), budgetReached: await budgetReached(pid) });
+}));
+p.post('/usage/budget', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const body = parse(z.object({ budgetUsd: z.number().min(0).max(100000).nullable(), actor: z.string() }), req.body);
+  const actor = await actorOf(req);
+  if (actor.role !== 'Migration lead') throw new HttpError(403, 'Only the migration lead sets the model budget');
+  await q('UPDATE projects SET model_budget_usd = $2 WHERE id = $1', [pid, body.budgetUsd]);
+  await audit(pid, actor.name, 'user', 'usage.budget', body.budgetUsd == null ? 'No limit' : `$${body.budgetUsd.toFixed(2)} a month`, 'External model calls stop for the month once the budget is used; work continues on the in-environment model');
+  await touch(pid);
+  res.json({ ok: true });
 }));
 p.post('/decisions/:id', wrap(async (req, res) => {
   const pid = pidOf(req);
@@ -681,12 +726,25 @@ if (fs.existsSync(webDist)) {
 const port = Number(process.env.PORT ?? 8791);
 await bootstrap();
 await listen();
-const server = app.listen(port, () => console.log(`Asset Migration Studio API on :${port} · model ${liveModel ? MODEL_LABEL : 'not configured'}`));
+
+// Background work: every replica runs a worker unless AMS_WORKER=off.
+handle('stage.run', (j) => runStage(j.projectId, Number(j.payload.n), String(j.payload.actor)));
+handle('decisions.run', async (j) => { await runQuestions(j.projectId, j.payload.ids as string[], String(j.payload.actor)); await touch(j.projectId); });
+handle('decisions.train', async (j) => { await trainProject(j.projectId, localDecisionModel, String(j.payload.actor), j.payload.ids as string[]); await touch(j.projectId); });
+onJobFailed(async (j, error) => {
+  // A failed stage goes back to ready so it can be run again.
+  await q(`UPDATE project_stages SET status = 'ready' WHERE project_id = $1 AND status = 'running'`, [j.projectId]);
+  await emitAgent(j.projectId, { agent: j.kind === 'stage.run' ? 'orchestrator' : 'decision-model', kind: 'error', text: `${j.label} failed: ${error}` });
+  await touch(j.projectId);
+});
+const worker = startWorker();
+const server = app.listen(port, () => console.log(`Asset Migration Studio API on :${port} · model ${liveModel ? MODEL_LABEL : 'not configured'} · worker ${worker ? 'on' : 'off'}`));
 
 // Container platforms send SIGTERM before stopping a replica: finish in-flight requests, then close the pool.
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {
   process.on(sig, () => {
     console.log(`${sig} received, shutting down`);
+    void stopWorker();
     server.close(() => pool.end().finally(() => process.exit(0)));
     setTimeout(() => process.exit(1), 10_000).unref();
   });

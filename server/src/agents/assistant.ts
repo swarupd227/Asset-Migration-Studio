@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { conceptById } from '../data/ontology.js';
 import { activeSkills, effectsOf } from '../learning/store.js';
 import { getProject } from '../store.js';
+import { recordCall } from '../usage.js';
 import { currentValidation, dashboard, getCodeRules, getFixes, getMappings, getQuestions, getRuns, MODEL_LABEL } from '../store.js';
 import type { CodeRule, FixProposal, LoadRun, Mapping, Question, ValidationFailure } from '../types.js';
 
@@ -68,6 +69,7 @@ export async function* answer(pid: string, history: ChatTurn[], ctx: ChatContext
   const project = await getProject(pid);
   const hints = project ? effectsOf(await activeSkills(pid, project), 'prompt_hint').filter((h) => h.effect.agents.includes('assistant')).map((h) => h.effect.text) : [];
   if (client) {
+    const t0 = Date.now();
     try {
       const last = history.at(-1)!;
       const messages: Anthropic.MessageParam[] = [
@@ -88,10 +90,12 @@ export async function* answer(pid: string, history: ChatTurn[], ctx: ChatContext
         if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') yield event.delta.text;
       }
       const final = await stream.finalMessage();
+      await recordCall({ agent: 'assistant', model: MODEL_LABEL, purpose: 'review question', projectId: pid, inputTokens: final.usage?.input_tokens ?? 0, outputTokens: final.usage?.output_tokens ?? 0, ms: Date.now() - t0, outcome: final.stop_reason === 'refusal' ? 'refusal' : 'ok' });
       if (final.stop_reason === 'refusal') yield '\n\n_The model declined this request. Try rephrasing it as a question about the mapping or the data._';
       if (final.stop_reason === 'max_tokens') yield '\n\n_(Answer cut short.)_';
       return;
     } catch (err) {
+      await recordCall({ agent: 'assistant', model: MODEL_LABEL, purpose: 'review question', projectId: pid, inputTokens: 0, outputTokens: 0, ms: Date.now() - t0, outcome: 'error', error: (err as Error).message });
       if (err instanceof Anthropic.APIError) {
         yield `_The model service is unavailable (${err.status ?? 'network'}). Answering from project data._\n\n`;
       } else {

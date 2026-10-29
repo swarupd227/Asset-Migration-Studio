@@ -11,6 +11,8 @@ import { itemsFor, questionById, type Prior } from './questions.js';
 import { reason, reasoningAvailable } from './reasoning.js';
 import { activeSkills, effectsOf, recordUse, refs } from '../learning/store.js';
 import type { Skill } from '../types.js';
+import { budgetReached } from '../usage.js';
+import { trainedDecisionModel } from './trained.js';
 
 // Four-step decision flow: rules → decision model → reasoning model → person.
 
@@ -54,8 +56,10 @@ export async function decisionSetting(pid: string): Promise<DecisionSetting> {
 export async function decisionModelFor(pid: string): Promise<DecisionModel | null> {
   const choice = await decisionSetting(pid);
   if (choice === 'off') return null;
-  if (choice === 'local') return localDecisionModel;
-  return reasoningAvailable() ? claudeDecisionModel() : localDecisionModel;
+  // In the environment: the project's trained model where one is active, keyword evidence otherwise.
+  const inEnv = await trainedDecisionModel(pid, localDecisionModel);
+  if (choice === 'local' || !reasoningAvailable() || (await budgetReached(pid))) return inEnv;
+  return claudeDecisionModel();
 }
 
 /** Settled and pending answers of a question, by record key. */
@@ -151,7 +155,9 @@ export async function runQuestion(pid: string, questionId: string, actor: string
     const b = band(conf, thresholds);
     if (b === 'reasoning' || (b === 'model' && inSample(it.recordKey, thresholds.sample))) needsReasoning.set(it.hash, it);
   }
-  const reasoningModel = reasoningAvailable() && setting === 'auto' ? `${process.env.AMS_MODEL ?? 'claude-opus-5-5'}` : 'none';
+  const overBudget = setting === 'auto' && reasoningAvailable() && (await budgetReached(pid));
+  if (overBudget) await emitAgent(pid, { agent: 'decision-model', kind: 'result', text: 'The monthly model budget is used up: answers come from the in-environment model and the reasoning check is paused.' });
+  const reasoningModel = reasoningAvailable() && setting === 'auto' && !overBudget ? `${process.env.AMS_MODEL ?? 'claude-opus-5-5'}` : 'none';
   const rCached = await cacheGet(pid, questionId, `${reasoningModel}:reasoning`, [...needsReasoning.keys()]);
   const rMiss = [...needsReasoning.values()].filter((i) => !rCached.has(i.hash));
   if (rMiss.length && reasoningModel !== 'none') {

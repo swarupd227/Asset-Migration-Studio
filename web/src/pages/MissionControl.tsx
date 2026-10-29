@@ -6,6 +6,7 @@ import { useApp } from '@/lib/app';
 import { num, pct } from '@/lib/format';
 import { Badge, Button, Card, CardHeader, cx, PageHeader, Progress, Skeleton, Stat } from '@/components/ui';
 import { AgentAvatar, agentName } from '@/components/agents';
+import { BackgroundWork, UsagePanel } from '@/components/operations';
 
 const phases = [
   { label: 'Understand', sub: 'Available in preview workspaces', range: [1, 6] },
@@ -56,7 +57,7 @@ export default function MissionControl() {
   const { dashboard: d, runStage, ask, activeAgents, meta, events } = useApp();
   if (!d || !meta) return <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-40" /><Skeleton className="h-64" /></div>;
   const k = d.kpis;
-  const busy = !!d.running;
+  const busy = !!d.running || !!d.job;
   const totalPaths = k.autoAccepted + k.quickReview + k.expertReview + k.namedReview;
   const decided = k.mapped + k.notMigrated;
   const nextRun = d.stages.find((s) => s.n === 8);
@@ -78,7 +79,7 @@ export default function MissionControl() {
         actions={<>
           <Button icon={Sparkles} onClick={() => ask('What needs my attention?')}>What needs me?</Button>
           <Button variant="agent" icon={Play} disabled={busy || nextRun?.status === 'locked'} onClick={() => runStage(8)}>
-            {busy ? 'Agents working…' : `Start Run ${d.stages.find((s) => s.n === 9)?.metric?.replace('Run ', '') ? Number(d.stages.find((s) => s.n === 9)!.metric!.replace('Run ', '')) + 1 : 3}`}
+            {d.job?.status === 'queued' ? 'Queued…' : busy ? 'Agents working…' : `Start Run ${d.stages.find((s) => s.n === 9)?.metric?.replace('Run ', '') ? Number(d.stages.find((s) => s.n === 9)!.metric!.replace('Run ', '')) + 1 : 3}`}
           </Button>
         </>}
       />
@@ -177,6 +178,10 @@ export default function MissionControl() {
         </div>
       </div>
 
+      <div className="mt-5 grid grid-cols-1 gap-5 @[980px]:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+        <UsagePanel />
+        <BackgroundWork />
+      </div>
       </div>
 
       {/* Agents */}

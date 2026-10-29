@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import type {
-  AgentEvent, AuditEntry, CatalogueTable, CodeRule, Dashboard, DecisionBatch, ModelDecision, Dataset, FixProposal, LoadRun, Mapping, Person, Project, Question, Stage, ValidationFailure,
+  ActiveJob, AgentEvent, AuditEntry, CatalogueTable, CodeRule, Dashboard, DecisionBatch, ModelDecision, Dataset, FixProposal, LoadRun, Mapping, Person, Project, Question, Stage, ValidationFailure,
 } from './types.js';
 import { bus, one, publish, q, tx } from './db.js';
+import { activeJob } from './jobs.js';
 import { activeSkills, effectsOf } from './learning/store.js';
 import { conceptById, ONTOLOGY_VERSION } from './data/ontology.js';
 import { conceptOf, dqSnapshot, hierarchyIssues, linkFixes, reconcile, runObjects, transform, validate, type DecisionInputs } from './rules.js';
@@ -320,9 +321,9 @@ export function runSignable(run: LoadRun) {
   return !run.reconciliation?.some((c) => c.outcome === 'fail') && !run.errors.length;
 }
 
-export async function dashboard(pid: string): Promise<Dashboard & { running: number | null }> {
-  const [project, stages, mappings, questions, codeRules, q2, running] = await Promise.all([
-    getProject(pid), getStages(pid), getMappings(pid), getQuestions(pid), getCodeRules(pid), quality(pid), runningStage(pid),
+export async function dashboard(pid: string): Promise<Dashboard & { running: number | null; job: ActiveJob | null }> {
+  const [project, stages, mappings, questions, codeRules, q2, running, job] = await Promise.all([
+    getProject(pid), getStages(pid), getMappings(pid), getQuestions(pid), getCodeRules(pid), quality(pid), runningStage(pid), activeJob(pid),
   ]);
   const fx = q2.fixes.filter((f) => f.status === 'proposed');
   const open = (m: Mapping) => m.status === 'proposed' || m.status === 'question';
@@ -347,6 +348,7 @@ export async function dashboard(pid: string): Promise<Dashboard & { running: num
   const woCount = (await one<{ n: number }>(`SELECT count(*)::int AS n FROM source_records WHERE project_id = $1 AND kind = 'workorder'`, [pid]))?.n ?? 0;
   return {
     project: project!, stages, running,
+    job: job ? { id: job.id, label: job.label, status: job.status as ActiveJob['status'], requestedBy: job.requestedBy, createdAt: job.createdAt, startedAt: job.startedAt } : null,
     kpis: {
       sourceElements: mappings.length,
       mapped: mappings.filter((m) => ['approved', 'changed', 'auto_accepted'].includes(m.status)).length,

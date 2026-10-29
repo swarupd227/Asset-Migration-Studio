@@ -127,6 +127,30 @@ CREATE TABLE IF NOT EXISTS eval_runs (
   id TEXT PRIMARY KEY, release TEXT NOT NULL, dataset TEXT NOT NULL, model TEXT NOT NULL, passed BOOLEAN NOT NULL,
   result JSONB NOT NULL, gate JSONB NOT NULL, started_by TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Every external model call: tokens, cost and time, by project, agent and stage.
+CREATE TABLE IF NOT EXISTS model_calls (
+  id BIGSERIAL PRIMARY KEY, project_id TEXT REFERENCES projects(id) ON DELETE CASCADE, stage INT, job_id TEXT,
+  agent TEXT NOT NULL, model TEXT NOT NULL, purpose TEXT NOT NULL, input_tokens INT NOT NULL, output_tokens INT NOT NULL,
+  cost_usd NUMERIC(12,6) NOT NULL, ms INT NOT NULL, outcome TEXT NOT NULL, error TEXT, at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS model_calls_by_project ON model_calls (project_id, at);
+ALTER TABLE projects ADD COLUMN IF NOT EXISTS model_budget_usd NUMERIC(10,2);
+-- Work queue: stage runs and decision batches run on any replica, one job per project at a time.
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, kind TEXT NOT NULL,
+  payload JSONB NOT NULL, status TEXT NOT NULL DEFAULT 'queued', attempts INT NOT NULL DEFAULT 0, worker TEXT,
+  requested_by TEXT NOT NULL, error TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), started_at TIMESTAMPTZ,
+  heartbeat_at TIMESTAMPTZ, finished_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS jobs_queue ON jobs (status, created_at);
+CREATE INDEX IF NOT EXISTS jobs_by_project ON jobs (project_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active ON jobs (project_id) WHERE status IN ('queued', 'running');
+-- In-environment decision models trained on decisions people made or confirmed, one per project and question.
+CREATE TABLE IF NOT EXISTS trained_models (
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE, question_id TEXT NOT NULL, version INT NOT NULL,
+  active BOOLEAN NOT NULL, data JSONB NOT NULL, trained_by TEXT NOT NULL, trained_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (project_id, question_id, version)
+);
 CREATE TABLE IF NOT EXISTS audit_log (
   project_id TEXT NOT NULL, seq INT NOT NULL, ts TIMESTAMPTZ NOT NULL, actor TEXT NOT NULL, actor_kind TEXT NOT NULL,
   action TEXT NOT NULL, target TEXT, detail TEXT, ontology_version TEXT, model TEXT, prev_hash TEXT NOT NULL, hash TEXT NOT NULL,
