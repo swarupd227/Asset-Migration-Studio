@@ -74,17 +74,17 @@ web/      React 19 + Vite + Tailwind v4
 
 The app ships as one container (`Dockerfile`): the API serves the built web app. Deployment runs from Azure Cloud Shell (bash); no local Azure CLI or Docker is needed.
 
-1. Make a zip of the source: `git archive -o asset-migration-studio.zip HEAD`
-2. In Cloud Shell, upload the zip (Manage files → Upload), then:
+In Cloud Shell:
 
 ```bash
 az account set --subscription "Microsoft Azure Sponsorship"
-mkdir -p ~/ams && unzip -o ~/asset-migration-studio.zip -d ~/ams && cd ~/ams
+git clone https://github.com/swarupd227/Asset-Migration-Studio.git ~/Asset-Migration-Studio
+cd ~/Asset-Migration-Studio
 bash deploy/azure/deploy.sh          # registry, image build, Key Vault, Container Apps
 bash deploy/azure/enable-signin.sh   # Entra ID sign-in for your tenant
 ```
 
-To ship a new version, upload a fresh zip and run `deploy.sh` again; it builds a new image tag and updates the app in place.
+To ship a new version, push to `main`, then in Cloud Shell run `git -C ~/Asset-Migration-Studio pull` and `bash deploy/azure/deploy.sh` again; it builds a new image tag and updates the app in place.
 
 The demo keeps state in memory, so the app runs as exactly one always-on replica, and a restart resets the demo.
 

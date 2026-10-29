@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Deploy Asset Migration Studio to Azure Container Apps. Run from Azure Cloud Shell (bash),
-# inside the unzipped source folder. Safe to re-run: existing resources are reused.
+# inside a clone of https://github.com/swarupd227/Asset-Migration-Studio.
+# Safe to re-run: existing resources are reused and the app is updated to the new image.
 set -euo pipefail
 
 az account set --subscription "Microsoft Azure Sponsorship"
