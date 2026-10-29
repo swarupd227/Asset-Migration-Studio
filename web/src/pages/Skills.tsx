@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { BookMarked, Check, Download, FileText, Library, Radar, RotateCcw, ShieldCheck, X } from 'lucide-react';
+import { BookMarked, Check, Download, FileText, FlaskConical, Globe2, Library, Lock, Radar, RotateCcw, Send, ShieldCheck, Upload, X } from 'lucide-react';
 import type { Skill, SkillEffect } from '@shared/types';
 import { useApi, useApp } from '@/lib/app';
 import { api } from '@/lib/api';
@@ -43,8 +43,9 @@ function Metric({ label, before, after, pct }: { label: string; before: number |
   );
 }
 
-function SkillCard({ s }: { s: SkillRow }) {
+function SkillCard({ s, sharedLearning }: { s: SkillRow; sharedLearning: boolean }) {
   const { persona, act } = useApp();
+  const canPropose = s.scope === 'project' && s.status === 'measured' && persona && ['Migration lead', 'Data subject expert'].includes(persona.role);
   const [reason, setReason] = useState('');
   const [open, setOpen] = useState(s.status === 'draft');
   const canDecide = s.scope === 'project' ? persona?.role === 'Data subject expert' : persona?.role === 'Ontology curator';
@@ -133,6 +134,7 @@ function SkillCard({ s }: { s: SkillRow }) {
                 <Button size="sm" variant="danger" icon={X} disabled={!reason.trim()} onClick={() => decide('reject')}>Reject</Button>
                 <Button size="sm" variant="ok" icon={Check} onClick={() => decide('approve')}>Approve for this project</Button>
               </>}
+              {canPropose && <Button size="sm" icon={Send} disabled={!sharedLearning} title={sharedLearning ? 'Anonymise and send to the curator' : 'Shared learning is off for this project'} onClick={() => persona && act(() => api.post(`/skills/${s.id}/propose`, { actor: persona.id }), 'Proposed to the shared library')}>Propose for sharing</Button>}
               {canDecide && ['approved', 'measured', 'published'].includes(s.status) && <Button size="sm" icon={RotateCcw} disabled={!reason.trim()} onClick={() => decide('retire')}>Retire</Button>}
               {!canDecide && s.status === 'draft' && <span className="text-[11px] text-ink-3">A data subject expert approves project skills.</span>}
             </div>
@@ -143,11 +145,59 @@ function SkillCard({ s }: { s: SkillRow }) {
   );
 }
 
-export default function Skills() {
+interface CuratorData { skills: Skill[]; libraries: { version: string; publishedAt: string; publishedBy: string; skills: { id: string }[] }[] }
+
+function CuratorTab() {
   const { persona, act } = useApp();
+  const { data } = useApi<CuratorData>('/curator/skills');
+  const isCurator = persona?.role === 'Ontology curator';
+  if (!data) return <Skeleton className="h-48" />;
+  const candidates = data.skills.filter((s) => s.status === 'proposed' || s.status === 'tested');
+  const tested = candidates.filter((s) => s.status === 'tested');
+  const next = data.libraries[0]?.version.replace(/(\d+)\.(\d+)\.(\d+)/, (_m, a, b) => `${a}.${Number(b) + 1}.0`);
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader title="Candidates for the shared library" icon={FlaskConical} subtitle="Anonymised project skills. Each must pass the golden datasets before it can be published."
+          right={<Button size="sm" variant="agent" icon={Upload} disabled={!isCurator || !tested.length} title={isCurator ? undefined : 'Only the ontology curator publishes'} onClick={() => persona && act(() => api.post('/curator/library', { actor: persona.id }), `Published ${next}`)}>Publish {next}{tested.length ? ` with ${tested.length}` : ''}</Button>} />
+        {candidates.length ? (
+          <ul className="divide-y divide-line rounded-lg border border-line">
+            {candidates.map((s) => (
+              <li key={s.id} className="flex flex-wrap items-center gap-3 px-3 py-2.5 text-[12.5px]">
+                <Badge tone={statusTone[s.status]} dot>{s.status}</Badge>
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium">{s.name}</div>
+                  <div className="truncate text-[11.5px] text-ink-3">{s.description}</div>
+                  {s.testRun && <div className={cx('text-[11px]', s.testRun.passed ? 'text-ok' : 'text-crit')}>{s.testRun.passed ? 'Golden datasets: no metric lowered' : `Golden datasets: ${s.testRun.regressions.map((r) => r.metric).join(', ')} lowered`}</div>}
+                </div>
+                <span className="font-mono text-[11px] text-ink-3">{s.id} · from {s.sourceProjects?.length ?? 0} project</span>
+                {s.status === 'proposed' && <Button size="sm" icon={FlaskConical} disabled={!isCurator} onClick={() => persona && act(() => api.post(`/curator/skills/${s.id}/test`, { actor: persona.id }), 'Golden-dataset test finished')}>Test on golden datasets</Button>}
+              </li>
+            ))}
+          </ul>
+        ) : <Empty icon={FlaskConical} title="No candidates">Projects with shared learning switched on propose measured skills that helped.</Empty>}
+      </Card>
+      <Card>
+        <CardHeader title="Library versions" icon={Library} />
+        <ul className="divide-y divide-line">
+          {data.libraries.map((l) => (
+            <li key={l.version} className="flex items-center gap-3 py-2 text-[12.5px]">
+              <span className="font-semibold">{l.version}</span>
+              <span className="text-ink-3">{l.skills.length} skills · published by {l.publishedBy} · {day(l.publishedAt)}</span>
+            </li>
+          ))}
+        </ul>
+      </Card>
+    </div>
+  );
+}
+
+export default function Skills() {
+  const { persona, act, dashboard } = useApp();
+  const sharedLearning = !!dashboard?.project.sharedLearning;
   const [params, setParams] = useSearchParams();
   const { data } = useApi<SkillsData>('/skills');
-  const tab = (params.get('tab') ?? 'use') as 'use' | 'drafts' | 'retired' | 'triggers';
+  const tab = (params.get('tab') ?? 'use') as 'use' | 'drafts' | 'retired' | 'triggers' | 'curator';
   const setTab = (t: string) => { const p = new URLSearchParams(params); p.set('tab', t); setParams(p); };
   if (!data) return <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-64" /></div>;
   const inUse = [...data.shared, ...data.project.filter((s) => ['approved', 'measured', 'proposed', 'tested', 'published'].includes(s.status))];
@@ -168,6 +218,11 @@ export default function Skills() {
             className="h-8.5 rounded-lg border border-line bg-surface px-2 text-[13px] outline-none disabled:opacity-60">
             {data.libraries.map((l) => <option key={l.version} value={l.version}>{l.version} · {day(l.published_at)}</option>)}
           </select>
+          <Button icon={sharedLearning ? Globe2 : Lock} disabled={persona?.role !== 'Customer data owner'}
+            title={persona?.role === 'Customer data owner' ? 'Shared learning follows your contract' : 'The customer data owner changes shared learning'}
+            onClick={() => persona && act(() => api.post('/shared-learning', { enabled: !sharedLearning, actor: persona.id }), sharedLearning ? 'Shared learning switched off' : 'Shared learning switched on')}>
+            Shared learning {sharedLearning ? 'on' : 'off'}
+          </Button>
           <Button icon={Radar} disabled={!canCheck} onClick={() => persona && act(() => api.post<{ fired: string[] }>('/skills/evaluate', { actor: persona.id }).then((r) => r), 'Triggers checked')}>Check triggers</Button>
         </>}
       />
@@ -176,8 +231,9 @@ export default function Skills() {
         { id: 'drafts', label: 'Drafts', count: drafts.length },
         { id: 'retired', label: 'Retired', count: retired.length },
         { id: 'triggers', label: 'Triggers', count: data.triggers.length },
+        { id: 'curator', label: 'Curator' },
       ]} />
-      {tab === 'triggers' ? (
+      {tab === 'curator' ? <CuratorTab /> : tab === 'triggers' ? (
         <Card pad={false}>
           {data.triggers.length ? (
             <ul className="divide-y divide-line">
@@ -193,7 +249,7 @@ export default function Skills() {
           ) : <div className="p-4"><Empty icon={Radar} title="No triggers have fired">Drafts appear after five same-kind corrections, five load errors for one reason, a recovery or a long successful chain.</Empty></div>}
         </Card>
       ) : list.length ? (
-        <div className="space-y-3">{list.map((s) => <SkillCard key={`${s.id}-${s.version}`} s={s} />)}</div>
+        <div className="space-y-3">{list.map((s) => <SkillCard key={`${s.id}-${s.version}`} s={s} sharedLearning={sharedLearning} />)}</div>
       ) : (
         <Card><Empty icon={FileText} title={tab === 'drafts' ? 'No drafts waiting' : 'Nothing here'}>{tab === 'drafts' ? 'The Ontology Steward drafts a skill when a pattern repeats on this project.' : undefined}</Empty></Card>
       )}

@@ -521,6 +521,10 @@ export interface Skill {
   approvedBy?: string;
   approvedAt?: string;
   statusNote?: string;
+  /** Shared candidates: the projects that contributed, so a customer can ask for removal. */
+  sourceProjects?: string[];
+  sourceSkill?: { id: string; version: number };
+  testRun?: { id: string; passed: boolean; regressions: { metric: string; baseline: number; now: number }[] };
   measuredEffect?: { uses: number; before: Record<string, number | null>; after: Record<string, number | null>; enoughData: boolean; at: string };
   createdAt: string;
   updatedAt: string;

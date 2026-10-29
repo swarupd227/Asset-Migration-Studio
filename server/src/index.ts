@@ -28,6 +28,7 @@ import { baseline, measureProjectSkills } from './learning/measure.js';
 import { toSkillMd } from './learning/format.js';
 import { datasets, limitsFor, listEvals, recordEval, RELEASE } from './evals/store.js';
 import { runEval } from './evals/run.js';
+import { helped, proposeForSharing, publishLibrary, ShareError, sharedSkills, testCandidate } from './learning/share.js';
 import type { CodeRule, Mapping, Person, Question } from './types.js';
 
 const app = express();
@@ -156,6 +157,28 @@ app.post('/api/evals/run', wrap(async (req, res) => {
   evalRunning = true;
   runEval({ model }).then((r) => recordEval(r, actor.name)).catch((e) => console.error('Evaluation failed:', e)).finally(() => { evalRunning = false; });
   res.status(202).json({ ok: true });
+}));
+
+// Curator: shared skill candidates, golden-dataset tests and library versions.
+const shareErr = (e: unknown) => { if (e instanceof ShareError) throw new HttpError(e.status, e.message); throw e; };
+async function curator(req: Request) {
+  const actor = await actorOf(req);
+  if (actor.role !== 'Ontology curator') throw new HttpError(403, 'Only the ontology curator manages the shared skill library');
+  return actor;
+}
+app.get('/api/curator/skills', wrap(async (_req, res) => {
+  const libraries = await q<{ version: string; published_at: Date; published_by: string; skills: unknown[] }>('SELECT * FROM skill_library ORDER BY published_at DESC');
+  res.json({ skills: await sharedSkills(), libraries: libraries.map((l) => ({ version: l.version, publishedAt: l.published_at.toISOString(), publishedBy: l.published_by, skills: l.skills })) });
+}));
+app.post('/api/curator/skills/:id/test', wrap(async (req, res) => {
+  const actor = await curator(req);
+  res.json(await testCandidate(String(req.params.id), actor.name).catch(shareErr));
+}));
+app.post('/api/curator/library', wrap(async (req, res) => {
+  const actor = await curator(req);
+  const r = await publishLibrary(actor.name).catch(shareErr);
+  for (const p of await listProjects()) await audit(p.id, actor.name, 'user', 'skill.library.publish', r.version, `New shared library version with ${r.added.join(', ')}; this project stays pinned until its migration lead upgrades`);
+  res.json(r);
 }));
 
 // Live agent activity and change notifications for one project (works across replicas via LISTEN/NOTIFY).
@@ -326,6 +349,26 @@ p.post('/skills/:id/decision', wrap(async (req, res) => {
   await audit(pid, actor.name, 'user', `skill.${body.decision}`, `${s.id} v${s.version}`, body.reason ?? s.name);
   await touch(pid);
   res.json(next);
+}));
+p.post('/shared-learning', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const body = parse(z.object({ enabled: z.boolean(), actor: z.string() }), req.body);
+  const actor = await actorOf(req);
+  if (actor.role !== 'Customer data owner') throw new HttpError(403, 'Shared learning follows the customer contract; the customer data owner changes it');
+  await q('UPDATE projects SET shared_learning = $2 WHERE id = $1', [pid, body.enabled]);
+  await audit(pid, actor.name, 'user', 'project.shared_learning', body.enabled ? 'on' : 'off', body.enabled ? 'Anonymised skills may be proposed to the shared library' : 'Project skills stay in the tenant');
+  await touch(pid);
+  res.json({ ok: true, sharedLearning: body.enabled });
+}));
+p.post('/skills/:id/propose', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const actor = await actorOf(req);
+  if (!['Migration lead', 'Data subject expert'].includes(actor.role)) throw new HttpError(403, 'Migration leads and data subject experts propose skills for sharing');
+  const c = await proposeForSharing(pid, String(req.params.id)).catch(shareErr);
+  await audit(pid, actor.name, 'user', 'skill.propose', `${req.params.id} → ${c.id}`, 'Anonymised and sent to the curator');
+  await emitAgent(pid, { agent: 'steward', kind: 'handoff', text: `"${c.name}" anonymised and proposed to the shared library as ${c.id}.` });
+  await touch(pid);
+  res.json(c);
 }));
 p.post('/skills/library', wrap(async (req, res) => {
   const pid = pidOf(req);

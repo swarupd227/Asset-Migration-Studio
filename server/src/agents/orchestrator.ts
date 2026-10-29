@@ -5,7 +5,9 @@ import {
   runSignable, setStage, touch, updateProject, upsertFixes,
 } from '../store.js';
 import { alignProject } from './aligner.js';
-import { activeSkills, effectsOf, recordUse, refs } from '../learning/store.js';
+import { activeSkills, effectsOf, projectSkills, recordUse, refs } from '../learning/store.js';
+import { helped, proposeForSharing } from '../learning/share.js';
+import { q } from '../db.js';
 import { evaluateLater } from '../learning/engine.js';
 import { getProject } from '../store.js';
 import { runQuestions } from '../decisions/flow.js';
@@ -94,10 +96,26 @@ async function steps(pid: string, n: number): Promise<Step[]> {
       { agent: 'orchestrator', kind: 'tool', text: 'Production load complete through IFS data migration tooling.', tool: 'ifs.migration_job', args: 'production', ms: 2600 },
       { agent: 'reconciler', kind: 'done', text: 'Post-cutover reconciliation passed.' },
     ];
-    case 14: return [
-      { agent: 'steward', kind: 'tool', text: `Stored ${decided} decisions as tenant precedents. Shared learning is off for this contract.`, tool: 'memory.write_tenant', ms: 900 },
-      { agent: 'steward', kind: 'needs_human', text: 'Ontology proposals sent to the curator.' },
-    ];
+    case 14: {
+      const project = await getProject(pid);
+      const skills = await projectSkills(pid);
+      const measured = skills.project.filter((s) => s.status === 'measured');
+      const ready = measured.filter(helped);
+      const proposals = await q<{ n: number }>(`SELECT count(*)::int AS n FROM ontology_proposals WHERE status = 'proposed'`);
+      const out: Step[] = [
+        { agent: 'steward', kind: 'tool', text: `Stored ${decided} decisions and ${skills.project.length} project skills in the tenant memory.`, tool: 'memory.write_tenant', ms: 900 },
+        { agent: 'steward', kind: 'result', text: `${proposals[0]?.n ?? 0} ontology proposals waiting for the curator.` },
+      ];
+      if (!project?.sharedLearning) out.push({ agent: 'steward', kind: 'done', text: `Shared learning is off for this contract: ${ready.length} measured skill${ready.length === 1 ? '' : 's'} that helped stay in the tenant.` });
+      else {
+        for (const s of ready) {
+          const c = await proposeForSharing(pid, s.id).catch(() => undefined);
+          if (c) out.push({ agent: 'steward', kind: 'handoff', text: `"${c.name}" anonymised and proposed to the shared library as ${c.id}.` });
+        }
+        out.push({ agent: 'steward', kind: ready.length ? 'needs_human' : 'done', text: ready.length ? 'Proposals sent to the ontology curator for golden-dataset testing.' : 'No measured skill showed a benefit yet.' });
+      }
+      return out;
+    }
     default: return [];
   }
 }

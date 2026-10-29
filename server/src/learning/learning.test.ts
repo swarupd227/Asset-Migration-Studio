@@ -4,6 +4,9 @@ import { parseEffects } from './schema.js';
 import { parseSkillMd, toSkillMd } from './format.js';
 import { chainTriggers, correctionTriggers, driftTriggers, loadErrorTriggers } from './triggers.js';
 import { matches } from './store.js';
+import { anonymiseSkill } from './anonymise.js';
+import { helped } from './share.js';
+import { gate, runEval } from '../evals/run.js';
 
 const skill: Skill = {
   id: 'SK-TEST', version: 2, name: 'Valve "stuck closed" means fail to open', description: 'Reviewers corrected these tags.', scope: 'project', projectId: 'p', status: 'draft',
@@ -57,6 +60,34 @@ describe('conditions', () => {
     expect(matches(skill, project)).toBe(true);
     expect(matches({ ...skill, conditions: { sourceSystems: ['SAP'] } }, project)).toBe(false);
     expect(matches({ ...skill, conditions: {} }, project)).toBe(true);
+  });
+});
+
+describe('sharing', () => {
+  const terms = { people: ['Dev Raman'], customers: ['Northvale Water & Power'], sites: ['Riverside Pumping', 'RIVR'] };
+  it('removes customer, site, people and record identifiers', () => {
+    const a = anonymiseSkill({ ...skill, description: 'Dev Raman corrected WO-060006 on PU-10012 at Riverside Pumping (RIVR-PS02-P01) for Northvale Water & Power.', examples: ['"Valve stuck closed" on VA-10024 → FTO'] }, terms);
+    expect(a.description).toBe('[person] corrected [work order] on [asset] at [site] ([location]) for [customer].');
+    expect(a.examples[0]).toBe('"Valve stuck closed" on [asset] → FTO');
+    expect(a.evidence).toEqual([{ kind: 'summary', ref: 'tenant', text: '1 items of evidence in the contributing project' }]);
+    expect(a.effects).toEqual(skill.effects);
+  });
+  it('shares only skills whose measured effect shows a benefit', () => {
+    const m = (before: number, after: number, enoughData = true) => ({ ...skill, measuredEffect: { uses: 50, enoughData, at: '', before: { needsReview: before, loadErrors: null, acceptance: null }, after: { needsReview: after, loadErrors: null, acceptance: 0.5 } } });
+    expect(helped(m(356, 6))).toBe(true);
+    expect(helped(m(6, 6))).toBe(false);
+    expect(helped(m(356, 6, false))).toBe(false);
+  });
+  it('passes the golden datasets with the valve skill loaded', async () => {
+    const base = await runEval({ model: 'local' });
+    const withSkill = await runEval({ model: 'local', skills: [skill] });
+    expect(gate(withSkill.metrics, base.metrics).passed).toBe(true);
+    expect(withSkill.metrics.failure_mode_coverage).toBeGreaterThanOrEqual(base.metrics.failure_mode_coverage);
+  });
+  it('fails the golden datasets when a skill teaches a wrong answer', async () => {
+    const base = await runEval({ model: 'local' });
+    const wrong = { ...skill, effects: [{ type: 'decision_rule' as const, question: 'wo.failure_mode', pattern: 'leak', answer: 'Vibration (VIB)' }] };
+    expect(gate((await runEval({ model: 'local', skills: [wrong] })).metrics, base.metrics).passed).toBe(false);
   });
 });
 

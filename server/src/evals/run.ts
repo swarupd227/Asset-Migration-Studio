@@ -1,4 +1,4 @@
-import type { Mapping, Project } from '../types.js';
+import type { Mapping, Project, Skill } from '../types.js';
 import { concepts, ONTOLOGY_VERSION } from '../data/ontology.js';
 import { proposeFixes, transform, validate } from '../rules.js';
 import { itemsFor, NONE_OPTION, questionById, type ItemContext } from '../decisions/questions.js';
@@ -76,20 +76,31 @@ async function decide(model: DecisionModel, questionId: string, items: { text: s
   };
 }
 
-export async function runEval(opts: { model?: 'local' | 'configured'; thresholds?: Thresholds; decisionModel?: DecisionModel } = {}): Promise<EvalResult> {
+/** `skills`: skills loaded for this run, so a candidate can be tested before it is published. */
+export async function runEval(opts: { model?: 'local' | 'configured'; thresholds?: Thresholds; decisionModel?: DecisionModel; skills?: Skill[] } = {}): Promise<EvalResult> {
   const t0 = Date.now();
   const thresholds = opts.thresholds ?? DEFAULT_THRESHOLDS;
   const model = opts.decisionModel ?? (opts.model === 'configured' && (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) ? claudeDecisionModel() : localDecisionModel);
   const ds = dataset();
   const project = { sourceSystems: ['IBM Maximo 7.6'], industryPack: 'Utilities', customer: GD01.name } as Project;
   const ctx = (prior: ItemContext['prior'] = () => new Map()): ItemContext => ({ ds, mappings: [] as Mapping[], project, prior });
+  const skills = opts.skills ?? [];
+  const withSkillRules = <T extends { text: string; options: string[]; ruleAnswer?: string; alwaysHuman?: boolean }>(questionId: string, items: T[]) => {
+    const rules = skills.flatMap((s) => s.effects).filter((e): e is Extract<Skill['effects'][number], { type: 'decision_rule' }> => e.type === 'decision_rule' && e.question === questionId).map((e) => ({ re: new RegExp(e.pattern, 'i'), answer: e.answer }));
+    return items.map((i) => {
+      if (i.ruleAnswer || i.alwaysHuman) return i;
+      const r = rules.find((x) => x.re.test(i.text) && i.options.includes(x.answer));
+      return r ? { ...i, ruleAnswer: r.answer } : i;
+    });
+  };
+  const skipTypes = skills.flatMap((s) => s.effects).flatMap((e) => (e.type === 'location_type_rule' && e.action === 'not_migrated' ? [e.locationType] : []));
 
   // Validation and remediation
   const failures = validate(ds);
   const seeded = seededErrors();
   const found = seeded.filter((s) => failures.some((f) => f.rule === s.rule && (f.record === s.record || f.record.includes(s.record) || f.record.startsWith(s.record))));
   const fixes = proposeFixes(ds, failures).map((f) => (f.kind === 'reparent' ? { ...f, status: 'approved' as const } : f));
-  const cur = transform(ds, fixes, []);
+  const cur = transform(ds, fixes, [], { notMigratedLocationTypes: skipTypes });
   const parents = goldenParents();
   const hierarchyOk = cur.assets.filter((a) => (parents.has(a.assetnum) ? !a.parent && a.location === parents.get(a.assetnum) : true)).length;
 
@@ -99,7 +110,7 @@ export async function runEval(opts: { model?: 'local' | 'configured'; thresholds
   const codeCorrect = codeAuto.filter((c) => goldenStatusCodes[c.recordKey] === c.ruleAnswer).length;
 
   // Failure modes
-  const fm = itemsFor('wo.failure_mode', ctx()).filter((i) => goldenMode(i.text) !== undefined);
+  const fm = withSkillRules('wo.failure_mode', itemsFor('wo.failure_mode', ctx()).filter((i) => goldenMode(i.text) !== undefined));
   const fmDecide = await decide(model, 'wo.failure_mode', fm.filter((i) => !i.ruleAnswer));
   const code = (opt: string) => (opt === NONE_OPTION ? 'NONE' : opt.match(/\((\w+)\)/)?.[1]);
   let auto = 0, autoCorrect = 0;
@@ -125,17 +136,17 @@ export async function runEval(opts: { model?: 'local' | 'configured'; thresholds
   }
 
   // Classification of untyped assets (family, then class)
-  const fam = itemsFor('asset.family', ctx());
+  const fam = withSkillRules('asset.family', itemsFor('asset.family', ctx()));
   const famDecide = await decide(model, 'asset.family', fam.filter((i) => !i.ruleAnswer));
   const famAnswers = new Map(fam.map((i) => [i.recordKey, { answer: i.ruleAnswer ?? famDecide(i).answer, confidence: 1, status: 'accepted' }]));
-  const cls = itemsFor('asset.class', ctx((id) => (id === 'asset.family' ? famAnswers : new Map())));
+  const cls = withSkillRules('asset.class', itemsFor('asset.class', ctx((id) => (id === 'asset.family' ? famAnswers : new Map()))));
   const clsDecide = await decide(model, 'asset.class', cls.filter((i) => !i.ruleAnswer));
   const goldCls = goldenClasses();
   const label = new Map(concepts.map((c) => [c.label, c.id]));
   const clsCorrect = cls.filter((i) => label.get(i.ruleAnswer ?? clsDecide(i).answer) === goldCls.get(i.recordKey)).length;
 
   // Duplicate pairs
-  const pairs = itemsFor('asset.same_asset', ctx());
+  const pairs = withSkillRules('asset.same_asset', itemsFor('asset.same_asset', ctx()));
   const pairDecide = await decide(model, 'asset.same_asset', pairs.filter((i) => !i.ruleAnswer));
   const saidYes = new Set(pairs.filter((i) => (i.ruleAnswer ?? pairDecide(i).answer) === 'Yes').map((i) => i.recordKey));
   const goldDup = goldenDuplicates();
