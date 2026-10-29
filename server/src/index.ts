@@ -13,7 +13,8 @@ import {
 } from './store.js';
 import { concepts, ONTOLOGY_VERSION, INDUSTRY_PACK } from './data/ontology.js';
 import { workOrderStats } from './data/seed.js';
-import { catalogueEntry, impliedSites, parseCsv, tableFromFilename, toRecords } from './extracts.js';
+import { catalogueEntry, impliedSites, tableFromFilename, toRecords } from './extracts.js';
+import { ExtractError, formatOf, readExtract } from './tabular.js';
 import { randomBytes } from 'node:crypto';
 import { hierarchyIssues, hierarchyTree, rules } from './rules.js';
 import { reviewProgressNudge, runStage } from './agents/orchestrator.js';
@@ -222,34 +223,47 @@ p.post('/stages/:n/run', wrap(async (req, res) => {
   res.status(202).json({ ok: true, job: await queue(pid, 'stage.run', { n, actor: actor.name }, actor.name) });
 }));
 
-// Extracts (CSV with a header row; the table is taken from ?table or the file name)
+// Extracts: CSV, Excel or Parquet with a header row; the table comes from ?table, the file name or the sheet name
 p.get('/extracts', wrap(async (req, res) => {
-  res.json(await q(`SELECT id, filename, table_name AS "table", row_count AS rows, columns, uploaded_by AS "uploadedBy", uploaded_at AS "uploadedAt" FROM extracts WHERE project_id = $1 ORDER BY uploaded_at DESC`, [pidOf(req)]));
+  res.json(await q(`SELECT id, filename, table_name AS "table", row_count AS rows, columns, format, sheet, uploaded_by AS "uploadedBy", uploaded_at AS "uploadedAt" FROM extracts WHERE project_id = $1 ORDER BY uploaded_at DESC`, [pidOf(req)]));
 }));
-p.post('/extracts', express.text({ type: () => true, limit: '50mb' }), wrap(async (req, res) => {
+p.post('/extracts', express.raw({ type: () => true, limit: '50mb' }), wrap(async (req, res) => {
   const pid = pidOf(req);
   const actor = await actorOf(req);
   if (['Ontology curator', 'Customer data owner'].includes(actor.role)) throw new HttpError(403, `${actor.role} cannot upload extracts`);
-  const filename = String(req.query.filename ?? 'extract.csv');
-  if (!/\.(csv|txt)$/i.test(filename)) throw new HttpError(400, 'Upload CSV files with a header row (export Excel and Parquet to CSV first)');
-  const rows = parseCsv(typeof req.body === 'string' ? req.body : '');
-  if (rows.length < 2) throw new HttpError(400, 'The file has no data rows');
-  const [header, ...data] = rows;
-  const table = String(req.query.table || tableFromFilename(filename)).toUpperCase();
+  const filename = String(req.query.filename ?? 'extract.csv').slice(0, 200);
+  const format = formatOf(filename);
+  if (!format) throw new HttpError(400, 'Upload CSV, Excel (.xlsx) or Parquet files with a header row');
+  const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from(typeof req.body === 'string' ? req.body : '');
+  const sheets = await readExtract(filename, buf).catch((e) => { if (e instanceof ExtractError) throw new HttpError(400, e.message); throw e; });
+  if (!sheets.length) throw new HttpError(400, 'The file has no data rows');
+  // One sheet (or a CSV/Parquet file) is named by ?table or the file name; a workbook's sheets by their own names.
+  const named = sheets.map((sh) => ({ ...sh, table: (sheets.length === 1 ? String(req.query.table || tableFromFilename(filename)) : tableFromFilename(`${sh.sheet}.xlsx`)).toUpperCase() }));
+  const dup = named.find((t, i) => named.findIndex((x) => x.table === t.table) !== i);
+  if (dup) throw new HttpError(400, `Two sheets load into ${dup.table}; keep one sheet per table`);
+  const results = [];
+  for (const t of named) results.push(await ingestTable(pid, actor.name, filename, format, t));
+  for (const n of [2, 3]) if ((await getStages(pid)).find((s) => s.n === n)?.status === 'locked') await setStage(pid, n, { status: 'ready' });
+  await setStage(pid, 1, { status: 'done', finished: true });
+  await touch(pid);
+  res.status(201).json({ format, tables: results });
+}));
+
+async function ingestTable(pid: string, actor: string, filename: string, format: string, t: { sheet?: string; table: string; header: string[]; rows: string[][] }) {
+  const { table, header, rows: data } = t;
+  const source = t.sheet ? `${filename} · ${t.sheet}` : filename;
   const records = toRecords(table, header, data);
   const existingLocs = new Set((await loadDataset(pid)).locations.map((l) => l.location).concat(records.filter((r) => r.kind === 'location').map((r) => r.key)));
   await insertRecords(pid, [...records, ...impliedSites(records, existingLocs)]);
   const entry = catalogueEntry(table, header, data);
   await q('INSERT INTO catalogue_tables (project_id, name, data) VALUES ($1, $2, $3) ON CONFLICT (project_id, name) DO UPDATE SET data = EXCLUDED.data', [pid, table, JSON.stringify(entry)]);
   const id = `EX-${randomBytes(4).toString('hex')}`;
-  await q('INSERT INTO extracts (id, project_id, filename, table_name, row_count, columns, uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7)', [id, pid, filename, table, data.length, JSON.stringify(header), actor.name]);
-  await audit(pid, actor.name, 'user', 'extract.upload', filename, `${table} · ${data.length.toLocaleString('en-GB')} rows · ${header.length} columns`);
-  for (const n of [2, 3]) if ((await getStages(pid)).find((s) => s.n === n)?.status === 'locked') await setStage(pid, n, { status: 'ready' });
-  await setStage(pid, 1, { status: 'done', finished: true });
-  await emitAgent(pid, { agent: 'profiler', kind: 'result', text: `${filename}: ${data.length.toLocaleString('en-GB')} rows profiled into ${table} (${entry.fields.filter((f) => f.custom).length} custom columns, ${records.length.toLocaleString('en-GB')} records loaded).` });
-  await touch(pid);
-  res.status(201).json({ id, table, rows: data.length, columns: header.length, records: records.length, custom: entry.fields.filter((f) => f.custom).map((f) => f.name) });
-}));
+  await q('INSERT INTO extracts (id, project_id, filename, table_name, row_count, columns, uploaded_by, format, sheet) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)', [id, pid, filename, table, data.length, JSON.stringify(header), actor, format, t.sheet ?? null]);
+  await audit(pid, actor, 'user', 'extract.upload', source, `${table} · ${format} · ${data.length.toLocaleString('en-GB')} rows · ${header.length} columns`);
+  const custom = entry.fields.filter((f) => f.custom).map((f) => f.name);
+  await emitAgent(pid, { agent: 'profiler', kind: 'result', text: `${source}: ${data.length.toLocaleString('en-GB')} rows profiled into ${table} (${custom.length} custom columns, ${records.length.toLocaleString('en-GB')} records loaded).` });
+  return { id, table, sheet: t.sheet, rows: data.length, columns: header.length, records: records.length, custom };
+}
 
 // Decisions
 p.get('/decisions/questions', wrap(async (req, res) => {

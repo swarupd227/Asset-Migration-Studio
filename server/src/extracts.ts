@@ -1,6 +1,6 @@
 import type { CatalogueField, CatalogueTable, SourceAsset, SourceLocation, SourcePm, SourceWorkOrder } from './types.js';
 
-// Flat-file extracts (CSV with a header row). Each upload is profiled column by column and, for the
+// Flat-file extracts (header row first; CSV parsing here, Excel and Parquet in tabular.ts). Each upload is profiled column by column and, for the
 // tables the platform understands, converted into source records.
 
 export function parseCsv(text: string): string[][] {

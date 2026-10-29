@@ -157,6 +157,8 @@ CREATE TABLE IF NOT EXISTS ontology_extensions (
   version TEXT NOT NULL, change TEXT NOT NULL, reason TEXT NOT NULL, source TEXT NOT NULL,
   accepted_by TEXT NOT NULL, accepted_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE extracts ADD COLUMN IF NOT EXISTS format TEXT NOT NULL DEFAULT 'csv';
+ALTER TABLE extracts ADD COLUMN IF NOT EXISTS sheet TEXT;
 CREATE TABLE IF NOT EXISTS audit_log (
   project_id TEXT NOT NULL, seq INT NOT NULL, ts TIMESTAMPTZ NOT NULL, actor TEXT NOT NULL, actor_kind TEXT NOT NULL,
   action TEXT NOT NULL, target TEXT, detail TEXT, ontology_version TEXT, model TEXT, prev_hash TEXT NOT NULL, hash TEXT NOT NULL,

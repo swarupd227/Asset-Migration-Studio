@@ -3,12 +3,16 @@ import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
 import { Clock, Database, EyeOff, FileSpreadsheet, KeyRound, Lock, Play, PlugZap, Server, ShieldCheck, Sparkles, Trash2, UploadCloud } from 'lucide-react';
 import { useApi, useApp } from '@/lib/app';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { day, num } from '@/lib/format';
 import type { CatalogueTable, CodeRule } from '@shared/types';
 import { Badge, Button, Card, CardHeader, cx, PageHeader, SectionLabel, Skeleton } from '@/components/ui';
 
-interface Extract { id: string; filename: string; table: string; rows: number; columns: string[]; uploadedBy: string; uploadedAt: string }
+interface Extract { id: string; filename: string; table: string; rows: number; columns: string[]; format: 'csv' | 'xlsx' | 'parquet'; sheet: string | null; uploadedBy: string; uploadedAt: string }
+interface UploadResult { format: string; tables: { table: string; sheet?: string; rows: number; custom: string[] }[] }
+
+const formatLabel = { csv: 'CSV', xlsx: 'Excel', parquet: 'Parquet' } as const;
+const ACCEPTED = /\.(csv|txt|xlsx|parquet)$/i;
 
 function ExtractUpload({ region }: { region: string }) {
   const { persona, act } = useApp();
@@ -19,21 +23,24 @@ function ExtractUpload({ region }: { region: string }) {
     if (!persona) return;
     setBusy(true);
     for (const f of Array.from(files)) {
-      await act(() => api.upload<{ table: string; rows: number; custom: string[] }>('/extracts', f, { actor: persona.id }).then((r) => r),
-        `${f.name} loaded`);
+      if (!ACCEPTED.test(f.name)) { await act(() => Promise.reject(new ApiError(400, `${f.name}: upload CSV, Excel (.xlsx) or Parquet files`))); continue; }
+      const r = await act(() => api.upload<UploadResult>('/extracts', f, { actor: persona.id }));
+      if (r) await act(async () => r, r.tables.length > 1
+        ? `${f.name}: ${r.tables.length} sheets loaded (${r.tables.map((t) => `${t.table} ${num(t.rows)}`).join(', ')})`
+        : `${f.name} loaded into ${r.tables[0].table}: ${num(r.tables[0].rows)} rows`);
     }
     setBusy(false);
   };
   return (
     <Card>
-      <CardHeader icon={FileSpreadsheet} title="Flat file extracts" subtitle="CSV with a header row, one file per table (ASSET.csv, LOCATIONS.csv, WORKORDER.csv, PM.csv)" />
+      <CardHeader icon={FileSpreadsheet} title="Flat file extracts" subtitle="CSV, Excel or Parquet with a header row. One file per table (ASSET, LOCATIONS, WORKORDER, PM), or one workbook with a sheet per table." />
       <label onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); if (e.dataTransfer.files.length) upload(e.dataTransfer.files); }}
         className={cx('flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-8 text-center transition', over ? 'border-accent bg-accent-soft/50' : 'border-line-strong bg-surface-2 hover:border-accent hover:bg-accent-soft/40')}>
         <UploadCloud className={cx('size-6', busy ? 'animate-bounce text-accent' : 'text-ink-3')} />
         <span className="text-[13px] font-medium">{busy ? 'Uploading and profiling…' : 'Drop extract files or browse'}</span>
         <span className="text-xs text-ink-3">Files stay in the project's isolated storage in {region}</span>
-        <input type="file" multiple accept=".csv,.txt,text/csv" className="sr-only" aria-label="Upload extract files" disabled={busy}
+        <input type="file" multiple accept=".csv,.txt,.xlsx,.parquet,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="sr-only" aria-label="Upload extract files" disabled={busy}
           onChange={(e) => { if (e.target.files?.length) upload(e.target.files); e.target.value = ''; }} />
       </label>
       {!!extracts?.length && (
@@ -41,8 +48,9 @@ function ExtractUpload({ region }: { region: string }) {
           {extracts.map((x) => (
             <div key={x.id} className="flex items-center gap-3 px-3 py-2 text-[12.5px]">
               <FileSpreadsheet className="size-4 text-ink-3" />
-              <span className="font-medium">{x.filename}</span>
+              <span className="font-medium">{x.filename}{x.sheet && <span className="font-normal text-ink-3"> · {x.sheet}</span>}</span>
               <Badge tone="neutral">{x.table}</Badge>
+              <Badge tone="info">{formatLabel[x.format] ?? x.format}</Badge>
               <span className="tabular text-ink-3">{num(x.rows)} rows · {x.columns.length} columns</span>
               <span className="ml-auto text-xs text-ink-4">{x.uploadedBy} · {day(x.uploadedAt)}</span>
             </div>

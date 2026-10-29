@@ -2,7 +2,7 @@
   "name": "asset-migration-studio",
   "private": true,
   "version": "0.1.0",
-  "description": "Asset Migration Studio - agentic Maximo/SAP to IFS Cloud migration (concept demo)",
+  "description": "Asset Migration Studio - agentic Maximo/SAP to IFS Cloud migration",
   "workspaces": [
     "server",
     "web"
@@ -17,5 +17,8 @@
   },
   "devDependencies": {
     "concurrently": "^10.0.6"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

@@ -36,7 +36,7 @@ npm run build && npm start   # production build served by the API
 ## Using the platform
 
 - **Projects:** create a delivery project or a 30-day preview workspace (migration leads and sales engineers).
-- **Sources:** upload CSV extracts, one file per table (`ASSET.csv`, `LOCATIONS.csv`, `WORKORDER.csv`, `PM.csv`). Each column is profiled; non-standard columns are flagged as customer extensions.
+- **Sources:** upload CSV, Excel (.xlsx) or Parquet extracts, one file per table (`ASSET`, `LOCATIONS`, `WORKORDER`, `PM`) or one workbook with a sheet per table. Each column is profiled; non-standard columns are flagged as customer extensions.
 - **Pipeline:** run discovery, profiling, alignment and target design from Mission control. Known fields are bound from the mapping memory; custom fields are bound by the Concept Aligner with evidence and a calibrated confidence.
 - **Review queue:** riskiest and least confident first; approve, reject, change or mark not migrated. Keyboard: J/K, A, R, C, N, ?.
 - **Data quality and validation:** findings are computed from the stored records; approved fixes and mappings are applied by the transformation before the next dry run.
