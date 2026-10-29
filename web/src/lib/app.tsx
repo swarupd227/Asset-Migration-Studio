@@ -148,7 +148,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [toast, loadMeta, projectId]);
 
   const persona = meta?.people.find((p) => p.id === personaId) ?? null;
-  const setPersona = useCallback((id: string) => { setPersonaId(id); localStorage.setItem('ams-persona', id); }, []);
+  // Switching person reloads every view, so lists and permissions show what that person sees now.
+  const setPersona = useCallback((id: string) => {
+    setPersonaId(id);
+    try { localStorage.setItem('ams-persona', id); } catch { /* storage unavailable */ }
+    setVersion((v) => v + 1);
+  }, []);
   const setDockOpen = useCallback((o: boolean) => { setDockOpenState(o); localStorage.setItem('ams-dock', o ? 'open' : 'closed'); }, []);
 
   const ask = useCallback((question: string, ctx?: { itemId?: string; label?: string }) => {

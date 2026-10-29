@@ -54,7 +54,7 @@ function StageTile({ s, busy }: { s: Stage; busy: boolean }) {
 }
 
 export default function MissionControl() {
-  const { dashboard: d, runStage, ask, activeAgents, meta, events } = useApp();
+  const { dashboard: d, runStage, ask, activeAgents, meta, events, persona } = useApp();
   if (!d || !meta) return <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-40" /><Skeleton className="h-64" /></div>;
   const k = d.kpis;
   const busy = !!d.running || !!d.job;
@@ -62,6 +62,10 @@ export default function MissionControl() {
   const decided = k.mapped + k.notMigrated;
   const nextRun = d.stages.find((s) => s.n === 8);
   const recent = events.slice(-4).reverse();
+  // The current person's work first, then everyone else's, each in severity order.
+  const mine = (n: { role: string }) => n.role === persona?.role;
+  const waiting = [...d.needsYou].sort((a, b) => Number(mine(b)) - Number(mine(a)));
+  const mineCount = waiting.filter(mine).length;
 
   return (
     <>
@@ -119,18 +123,18 @@ export default function MissionControl() {
               <h2 className="text-[13.5px] font-semibold">Waiting for people</h2>
               <Badge tone="warn">{d.needsYou.length}</Badge>
             </div>
-            <span className="text-xs text-ink-3">Assigned by role</span>
+            <span className="text-xs text-ink-3">{persona ? (mineCount ? `${mineCount} for you as ${persona.role.toLowerCase()}` : `Nothing for you as ${persona.role.toLowerCase()}`) : 'Assigned by role'}</span>
           </div>
           <ul className="divide-y divide-line">
-            {d.needsYou.map((n, i) => (
+            {waiting.map((n, i) => (
               <motion.li key={n.id} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: i * 0.04 }}>
-                <Link to={n.href} className="group flex items-center gap-3 px-4 py-3 transition hover:bg-surface-2">
+                <Link to={n.href} className={cx('group flex items-center gap-3 px-4 py-3 transition hover:bg-surface-2', persona && !mine(n) && 'opacity-70')}>
                   <span className={cx('h-9 w-1 shrink-0 rounded-full', n.severity === 'high' ? 'bg-crit' : n.severity === 'medium' ? 'bg-warn' : 'bg-info')} />
                   <div className="min-w-0 flex-1">
                     <div className="text-[13px] font-medium">{n.title}</div>
                     <div className="mt-0.5 truncate text-xs text-ink-3">{n.detail}</div>
                   </div>
-                  <Badge tone="neutral">{n.role}</Badge>
+                  <Badge tone={mine(n) ? 'accent' : 'neutral'}>{mine(n) ? 'Yours' : n.role}</Badge>
                   <ArrowRight className="size-4 text-ink-4 transition group-hover:translate-x-0.5 group-hover:text-ink" />
                 </Link>
               </motion.li>
