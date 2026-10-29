@@ -4,7 +4,7 @@ import type {
 } from './types.js';
 import { bus, one, publish, q, tx } from './db.js';
 import { conceptById, ONTOLOGY_VERSION } from './data/ontology.js';
-import { conceptOf, dqSnapshot, hierarchyIssues, linkFixes, reconcile, runObjects, transform, validate } from './rules.js';
+import { conceptOf, dqSnapshot, hierarchyIssues, linkFixes, reconcile, runObjects, transform, validate, type DecisionInputs } from './rules.js';
 
 export const MODEL_LABEL = process.env.AMS_MODEL ?? 'claude-opus-5-5';
 
@@ -262,12 +262,27 @@ export function projectState(pid: string) {
   return value;
 }
 
+/** Settled decisions that the rules engine takes as input (class inference, duplicate pairs, cause plausibility). */
+export async function decisionInputs(pid: string): Promise<DecisionInputs> {
+  const rows = await q<{ question_id: string; record_key: string; answer: string; confidence: number }>(
+    `SELECT question_id, record_key, answer, confidence FROM model_decisions
+     WHERE project_id = $1 AND status <> 'needs_review' AND question_id IN ('asset.class', 'asset.same_asset', 'wo.cause_plausible')`, [pid]);
+  const byLabel = new Map([...conceptById.values()].map((c) => [c.label, c.id]));
+  const dec: DecisionInputs = { classes: new Map(), pairs: new Map(), causeScores: new Map() };
+  for (const r of rows) {
+    if (r.question_id === 'asset.class' && byLabel.has(r.answer)) dec.classes!.set(r.record_key, { concept: byLabel.get(r.answer)!, confidence: r.confidence });
+    if (r.question_id === 'asset.same_asset') dec.pairs!.set(r.record_key, { same: r.answer === 'Yes', confidence: r.confidence });
+    if (r.question_id === 'wo.cause_plausible') dec.causeScores!.set(r.record_key, { score: Number(r.answer), confidence: r.confidence });
+  }
+  return dec;
+}
+
 async function computeState(pid: string) {
-  const [raw, fixes, mappings] = await Promise.all([loadDataset(pid), getFixes(pid), getMappings(pid)]);
-  const rawFailures = validate(raw);
+  const [raw, fixes, mappings, dec] = await Promise.all([loadDataset(pid), getFixes(pid), getMappings(pid), decisionInputs(pid)]);
+  const rawFailures = validate(raw, dec);
   const cur = transform(raw, fixes, mappings);
-  const curFailures = linkFixes(validate(cur), fixes);
-  return { raw, rawFailures, cur, curFailures, fixes, mappings };
+  const curFailures = linkFixes(validate(cur, dec), fixes);
+  return { raw, rawFailures, cur, curFailures, fixes, mappings, dec };
 }
 
 export async function currentValidation(pid: string): Promise<ValidationFailure[]> {

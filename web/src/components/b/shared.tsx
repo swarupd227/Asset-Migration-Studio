@@ -78,7 +78,9 @@ export function EvidenceBar({ m }: { m: Mapping }) {
 }
 
 export function PrecedentList({ items, limit }: { items: Precedent[]; limit?: number }) {
-  const list = limit ? items.slice(0, limit) : items;
+  // Most relevant precedents first when the decision layer has scored them.
+  const sorted = [...items].sort((a, b) => (b.relevance ?? 0) - (a.relevance ?? 0));
+  const list = limit ? sorted.slice(0, limit) : sorted;
   if (!list.length) return <div className="rounded-lg border border-dashed border-line px-3 py-3 text-xs text-ink-3">No precedent in the mapping memory. This is the first time the agents have seen this element, which lowers confidence.</div>;
   return (
     <ul className="space-y-1.5">
@@ -89,6 +91,7 @@ export function PrecedentList({ items, limit }: { items: Precedent[]; limit?: nu
             <div className="truncate text-[12.5px] font-medium">{p.project}</div>
             <div className="truncate text-[11px] text-ink-3">{p.note || 'Approved'} · {p.count}× in that project</div>
           </div>
+          {p.relevance !== undefined && <Badge tone={p.relevance >= 4 ? 'ok' : p.relevance === 3 ? 'neutral' : 'warn'} title="Relevance to this project, 1 to 5">Relevance {p.relevance}</Badge>}
           <Badge tone={p.outcome === 'approved' ? 'ok' : p.outcome === 'changed' ? 'accent' : 'crit'}>{p.outcome}</Badge>
         </li>
       ))}

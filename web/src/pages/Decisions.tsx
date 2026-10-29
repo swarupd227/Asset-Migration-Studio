@@ -8,7 +8,7 @@ import { api } from '@/lib/api';
 import { num, pct, timeAgo } from '@/lib/format';
 import { Badge, Button, Card, CardHeader, Confidence, cx, Empty, Mono, PageHeader, Segmented, SectionLabel, Skeleton } from '@/components/ui';
 
-interface QuestionsInfo { questions: DecisionQuestionInfo[]; model: string; reasoningModel: string | null; thresholds: { auto: number; human: number; sample: number } }
+interface QuestionsInfo { questions: DecisionQuestionInfo[]; model: string; setting: 'auto' | 'local' | 'off'; reasoningModel: string | null; thresholds: { auto: number; human: number; sample: number } }
 interface Stats {
   byStep: { question_id: string; step: string; status: string; n: number; conf: number }[];
   answers: { question_id: string; answer: string; n: number }[];
@@ -65,7 +65,8 @@ function ReviewRow({ d, onDone }: { d: ModelDecision; onDone: () => void }) {
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Mono className="font-medium text-ink">{d.recordKey}</Mono>
-          <Badge tone="neutral">{d.context.assetClass}</Badge>
+          {Object.entries(d.context).filter(([k]) => k !== 'screen').slice(0, 2).map(([k, v]) => <Badge key={k} tone="neutral">{v}</Badge>)}
+          {d.context.screen && <Badge tone="crit">Instruction-like text</Badge>}
           {d.sampled && <Badge tone="info">Review sample</Badge>}
           {d.reasoning && d.reasoning.answer !== d.answer && <Badge tone="warn">Models disagree</Badge>}
         </div>
@@ -89,7 +90,7 @@ function ReviewRow({ d, onDone }: { d: ModelDecision; onDone: () => void }) {
         </select>
         <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Reason (required to change the tag)" className="h-8 rounded-lg border border-line bg-surface px-2.5 text-[12.5px] outline-none placeholder:text-ink-4 focus:border-accent" />
         <div className="flex gap-2">
-          <Button size="sm" variant="ok" icon={Check} onClick={() => submit('accept')}>Accept {d.answer.replace(/\s*\(\w+\)/, '')}</Button>
+          <Button size="sm" variant="ok" icon={Check} onClick={() => submit('accept')}>Accept {d.answer.replace(/\s*\(\w+\)/, '').slice(0, 40)}</Button>
           <Button size="sm" disabled={choice === d.answer || !note.trim()} onClick={() => submit('override')}>Set tag</Button>
         </div>
       </div>
@@ -110,20 +111,48 @@ export default function Decisions() {
   const answers = (stats?.answers ?? []).filter((a) => a.question_id === question).slice(0, 8);
   const maxAnswer = Math.max(1, ...answers.map((a) => a.n));
   const canRun = persona && ['Migration lead', 'Data subject expert'].includes(persona.role);
-  const run = () => persona && act(() => api.post('/decisions/run', { question, actor: persona.id }), 'Decision batch started');
+  const run = (id: string) => persona && act(() => api.post('/decisions/run', { question: id, actor: persona.id }), id === 'all' ? 'All decision batches started' : 'Decision batch started');
+  const setModel = (model: string) => persona && act(() => api.post('/decisions/settings', { model, actor: persona.id }), 'Decision model updated');
+  const pickQuestion = (id: string) => { const p = new URLSearchParams(params); p.set('question', id); setParams(p); };
+  const totals = (id: string) => (stats?.byStep ?? []).filter((r) => r.question_id === id);
+  const isLead = persona?.role === 'Migration lead';
 
   if (!info || !stats) return <div className="space-y-4"><Skeleton className="h-24" /><Skeleton className="h-64" /></div>;
   return (
     <>
       <PageHeader
-        eyebrow={<><Gauge className="size-3.5" />{info.model}{info.reasoningModel ? ` · reasoning ${info.reasoningModel}` : ''} · auto-accept ≥ {info.thresholds.auto} · person &lt; {info.thresholds.human}</>}
+        eyebrow={<><Gauge className="size-3.5" />{info.setting === 'off' ? 'External models off · rules and people only' : `${info.model}${info.reasoningModel ? ` · reasoning ${info.reasoningModel}` : ''}`} · auto-accept ≥ {info.thresholds.auto} · person &lt; {info.thresholds.human}</>}
         title="Bulk decisions"
         description="Typed decisions on records, settled by rules, the decision model, the reasoning model or a person."
         actions={<>
-          <Button icon={Play} disabled={!canRun || !!dashboard?.running} onClick={run} title={canRun ? undefined : 'Migration leads and data subject experts run decision batches'}>Run {q?.label.toLowerCase()}</Button>
-          <Button variant="agent" icon={Play} disabled={!!dashboard?.running} onClick={() => runStage(8)}>Start dry run</Button>
+          <select value={info.setting} disabled={!isLead} onChange={(e) => setModel(e.target.value)} title={isLead ? 'Decision model for this project' : 'Only the migration lead changes the decision model'}
+            className="h-8.5 rounded-lg border border-line bg-surface px-2 text-[13px] outline-none disabled:opacity-60">
+            <option value="auto">Decision + reasoning model</option>
+            <option value="local">In-environment model only</option>
+            <option value="off">Off: rules and people only</option>
+          </select>
+          <Button icon={Play} disabled={!canRun || !!dashboard?.running} onClick={() => run(question)} title={canRun ? undefined : 'Migration leads and data subject experts run decision batches'}>Run this question</Button>
+          <Button variant="agent" icon={Play} disabled={!canRun || !!dashboard?.running} onClick={() => run('all')}>Run all questions</Button>
         </>}
       />
+
+      <div className="mb-5 flex gap-2 overflow-x-auto pb-1">
+        {info.questions.map((x) => {
+          const rows = totals(x.id);
+          const n = rows.reduce((s, r) => s + r.n, 0);
+          const open = rows.filter((r) => r.status === 'needs_review').reduce((s, r) => s + r.n, 0);
+          return (
+            <button key={x.id} onClick={() => pickQuestion(x.id)}
+              className={cx('shrink-0 rounded-xl border px-3 py-2 text-left transition', x.id === question ? 'border-accent bg-accent-soft/50 ring-2 ring-accent/10' : 'border-line bg-surface hover:border-line-strong')}>
+              <div className="text-[12.5px] font-medium">{x.label}</div>
+              <div className="mt-0.5 flex gap-2 text-[11px] text-ink-3 tabular">
+                <span>{n ? `${num(n)} records` : 'Not run'}</span>
+                {open > 0 && <span className="font-medium text-warn">{num(open)} to review</span>}
+              </div>
+            </button>
+          );
+        })}
+      </div>
 
       <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
         <Card>

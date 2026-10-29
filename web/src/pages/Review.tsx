@@ -18,7 +18,8 @@ type Filter = 'pending' | 'named' | 'expert' | 'quick' | 'auto' | 'decided';
 type Mode = null | 'approve' | 'reject' | 'change' | 'not_migrated';
 
 const riskRank = { high: 0, medium: 1, low: 2 } as const;
-const byRiskThenConfidence = (a: Mapping, b: Mapping) => riskRank[a.risk] - riskRank[b.risk] || a.confidence - b.confidence;
+// Review risk from the decision layer comes first (5 = highest); the agent's risk level breaks ties.
+const byRiskThenConfidence = (a: Mapping, b: Mapping) => (b.riskScore ?? 0) - (a.riskScore ?? 0) || riskRank[a.risk] - riskRank[b.risk] || a.confidence - b.confidence;
 
 function matches(m: Mapping, f: Filter) {
   if (f === 'decided') return !isPending(m);
@@ -45,6 +46,7 @@ function QueueRow({ m, selected, onClick }: { m: Mapping; selected: boolean; onC
       </div>
       <div className="mt-1 flex items-center gap-1.5 pl-3.5">
         <span className="min-w-0 flex-1 truncate text-xs text-ink-3">→ {m.conceptLabel}</span>
+        {m.riskScore !== undefined && <Badge tone={m.riskScore >= 4 ? 'crit' : m.riskScore === 3 ? 'warn' : 'neutral'} title="Review risk, 1 to 5">Risk {m.riskScore}</Badge>}
         {m.safetyCritical && <Badge tone="crit">Safety</Badge>}
         {m.regulatory && <Badge tone="crit">Regulatory</Badge>}
         {m.custom && <Badge tone="warn">Custom</Badge>}

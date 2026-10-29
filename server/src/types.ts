@@ -139,6 +139,8 @@ export interface Precedent {
   outcome: 'approved' | 'rejected' | 'changed';
   count: number;
   note: string;
+  /** How relevant the precedent is to this project, 1 to 5, from the decision layer. */
+  relevance?: number;
 }
 
 export interface Alternative {
@@ -185,6 +187,8 @@ export interface Mapping {
   reviewer?: string;
   reviewNote?: string;
   patternKey?: string; // items sharing an evidence pattern can be bulk-approved
+  /** Review risk from the decision layer, 1 (low) to 5 (high). */
+  riskScore?: number;
 }
 
 export interface CodeRule {
@@ -441,6 +445,8 @@ export interface ModelDecision {
   /** Answer of the reasoning model when it checked this record, and why. */
   reasoning?: { answer: string; explanation: string; model: string };
   sampled?: boolean;
+  /** Recorded as "none or unclear" because no answer was confident enough. */
+  abstained?: boolean;
   decidedBy?: string;
   reviewNote?: string;
   createdAt: string;

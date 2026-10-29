@@ -5,7 +5,9 @@ import {
   runSignable, setStage, touch, updateProject, upsertFixes,
 } from '../store.js';
 import { alignProject } from './aligner.js';
-import { runQuestion } from '../decisions/flow.js';
+import { runQuestions } from '../decisions/flow.js';
+import { questionsForStage } from '../decisions/questions.js';
+import { decisionInputs } from '../store.js';
 import { ONTOLOGY_VERSION } from '../data/ontology.js';
 import { proposeFixes, validate } from '../rules.js';
 
@@ -121,15 +123,16 @@ export async function runStage(pid: string, n: number, actor: string) {
   try {
     if (n >= 8 && n <= 11) {
       for (const k of [8, 9, 10, 11].filter((k) => k >= n)) {
-        if (k === 8) {
-          // Tag work history before building: reruns answer from the decision cache.
-          await setStage(pid, 8, { status: 'running', started: true });
-          await runQuestion(pid, 'wo.failure_mode', 'decision-model');
+        if (k === 8 || k === 10) {
+          // Decision batches for this stage run first; reruns answer from the decision cache.
+          await setStage(pid, k, { status: 'running', started: true });
+          await runQuestions(pid, questionsForStage(k), 'decision-model');
         }
         if (k === 10) {
           // The Remediation Agent proposes fixes for anything the raw data still breaks.
           const raw = await loadDataset(pid);
-          await upsertFixes(pid, proposeFixes(raw, validate(raw)));
+          const dec = await decisionInputs(pid);
+          await upsertFixes(pid, proposeFixes(raw, validate(raw, dec), dec));
         }
         await play(pid, k);
       }
@@ -150,6 +153,11 @@ export async function runStage(pid: string, n: number, actor: string) {
         await audit(pid, 'aligner', 'agent', 'alignment.propose', `${proposed.length} mappings`);
       }
       await play(pid, n);
+      // Screening (stage 2) and review risk, precedent relevance and code lists (stage 5).
+      if (n === 2 || n === 5) {
+        await runQuestions(pid, questionsForStage(n), 'decision-model').catch((e) =>
+          emitAgent(pid, { agent: 'decision-model', kind: 'error', stage: n, text: `Decision batch failed: ${String(e?.message ?? e)}` }));
+      }
       const next = (await getStages(pid)).find((s) => s.n === n + 1);
       if (next?.status === 'locked' && n < 7) await setStage(pid, n + 1, { status: n + 1 === 7 ? 'waiting' : 'ready' });
       if (n === 13) { await updateProject(pid, { status: 'Live in IFS Cloud' }); await setStage(pid, 14, { status: 'ready' }); }

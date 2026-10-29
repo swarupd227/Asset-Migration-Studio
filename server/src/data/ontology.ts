@@ -211,3 +211,22 @@ export const ontologyChangeLog = [
   { version: '2.3.2', date: '2026-08-12', change: 'Runtime hours marked cumulative with replacement exception', reason: 'MIMOSA CCOM alignment', source: 'Standard', author: 'Curator' },
   { version: '2.3.0', date: '2026-07-01', change: 'New concept: Chlorinator, flagged regulatory', reason: 'Drinking water compliance', source: 'Expert review', author: 'Curator' },
 ];
+
+// Equipment families group L1 classes, so class inference can run in two steps (family, then
+// class) and stay within the option limit of a typed question as packs grow.
+export const families: { label: string; concepts: string[] }[] = [
+  { label: 'Rotating equipment', concepts: ['util:CentrifugalPump', 'util:ElectricMotor', 'util:Blower'] },
+  { label: 'Flow control', concepts: ['util:Valve'] },
+  { label: 'Instruments and meters', concepts: ['util:Instrument', 'util:FlowMeter'] },
+  { label: 'Electrical network', concepts: ['util:DistributionTransformer', 'util:CircuitBreaker', 'util:Switchgear'] },
+  { label: 'Treatment and dosing', concepts: ['util:Chlorinator'] },
+];
+
+// Failure causes (ISO 14224 style, utilities pack wording).
+export const failureCauses = [
+  'Mechanical wear or fatigue (MWF)', 'Corrosion or erosion (COR)', 'Electrical fault (ELF)', 'Instrument or control fault (ICF)',
+  'Contamination or blockage (CON)', 'Operating error (OPE)', 'Maintenance error (MNE)', 'Design or installation (DES)', 'External cause (EXT)',
+];
+
+// Local cause codes found in the extract, with their meaning.
+export const causeCodeMeaning: Record<string, string> = { TAPCHG: 'tap changer failure', MECH: 'mechanical failure – general', SEAL: 'seal failure', ELEC: 'electrical fault' };

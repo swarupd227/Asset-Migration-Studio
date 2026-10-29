@@ -25,9 +25,9 @@ export const toneBg: Record<Tone, string> = {
   neutral: 'bg-ink-4', accent: 'bg-accent', agent: 'bg-agent', ok: 'bg-ok', warn: 'bg-warn', bad: 'bg-bad', crit: 'bg-crit', info: 'bg-info',
 };
 
-export function Badge({ tone = 'neutral', children, className, icon: Icon, dot }: { tone?: Tone; children: ReactNode; className?: string; icon?: LucideIcon; dot?: boolean }) {
+export function Badge({ tone = 'neutral', children, className, icon: Icon, dot, title }: { tone?: Tone; children: ReactNode; className?: string; icon?: LucideIcon; dot?: boolean; title?: string }) {
   return (
-    <span className={cx('inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium leading-4 whitespace-nowrap', toneClass[tone], className)}>
+    <span title={title} className={cx('inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium leading-4 whitespace-nowrap', toneClass[tone], className)}>
       {dot && <span className={cx('size-1.5 rounded-full', toneBg[tone])} />}
       {Icon && <Icon className="size-3" strokeWidth={2.2} />}
       {children}

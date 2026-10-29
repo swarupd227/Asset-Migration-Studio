@@ -44,6 +44,16 @@ export function inferConcept(a: SourceAsset): string | undefined {
   return order.find(([re]) => re.test(d))?.[1];
 }
 
+/** Settled answers from the decision layer that change what the rules conclude. */
+export interface DecisionInputs {
+  /** Untyped asset → inferred class. */
+  classes?: Map<string, { concept: string; confidence: number }>;
+  /** "A|B" asset pair → same physical asset or not. */
+  pairs?: Map<string, { same: boolean; confidence: number }>;
+  /** Work order → plausibility of its recorded cause, 1 to 5. */
+  causeScores?: Map<string, { score: number; confidence: number }>;
+}
+
 export const isClosed = (w: { status: string }) => w.status === 'CLOSE' || w.status === 'COMP';
 const normSerial = (s?: string) => (s ?? '').toUpperCase().replace(/\s/g, '');
 const twoYearsAgo = () => new Date(Date.now() - 2 * 365 * 86400_000).toISOString().slice(0, 10);
@@ -111,7 +121,7 @@ export function transform(raw: Dataset, fixes: FixProposal[], mappings: Mapping[
 
 // ---------------- Validation ----------------
 
-export function validate(ds: Dataset): ValidationFailure[] {
+export function validate(ds: Dataset, dec: DecisionInputs = {}): ValidationFailure[] {
   const out: ValidationFailure[] = [];
   const assets = new Map(ds.assets.map((a) => [a.assetnum, a]));
   const locs = new Set(ds.locations.map((l) => l.location));
@@ -131,7 +141,10 @@ export function validate(ds: Dataset): ValidationFailure[] {
           proposedFix: `Move it under functional object ${a.location}.` });
       }
     }
-    if (!a.classstructure) add({ key: a.assetnum, rule: 'DQ-02', record: a.assetnum, object: 'Serial object', site: a.siteid, severity: 'error', reason: `Asset ${a.assetnum} ("${a.description}") has no classification, so it cannot get an IFS object type.`, proposedFix: inferConcept(a) ? `Classify as ${label(inferConcept(a))}.` : 'Classify manually.' });
+    if (!a.classstructure) {
+      const cls = dec.classes?.get(a.assetnum)?.concept ?? inferConcept(a);
+      add({ key: a.assetnum, rule: 'DQ-02', record: a.assetnum, object: 'Serial object', site: a.siteid, severity: 'error', reason: `Asset ${a.assetnum} ("${a.description}") has no classification, so it cannot get an IFS object type.`, proposedFix: cls ? `Classify as ${label(cls)}.` : 'Classify manually.' });
+    }
     if (a.status === 'DECOMMISSIONED' && a.statusDate < twoYearsAgo()) add({ key: a.assetnum, rule: 'BR-02', record: a.assetnum, object: 'Serial object', site: a.siteid, severity: 'warning', reason: `Asset ${a.assetnum} was decommissioned on ${a.statusDate}, more than two years ago, but is still in the load set.`, proposedFix: 'Archive it instead of migrating it.' });
     if (/^OLD\s*-/i.test(a.description)) add({ key: a.assetnum, rule: 'DQ-03', record: a.assetnum, object: 'Serial object', site: a.siteid, severity: 'warning', reason: `"${a.description}" does not follow the naming standard <class> · <function> · <position>.`, proposedFix: 'Apply the naming standard.' });
     const c = cid ? conceptById.get(cid) : undefined;
@@ -145,14 +158,23 @@ export function validate(ds: Dataset): ValidationFailure[] {
     }
   }
 
-  // Duplicates
+  // Duplicates: pairs the decision layer settled as the same asset; without decisions, an exact key.
+  if (dec.pairs?.size) {
+    for (const [key, v] of dec.pairs) {
+      if (!v.same) continue;
+      const [ka, kb] = key.split('|');
+      const keep = assets.get(ka), d = assets.get(kb);
+      if (!keep || !d) continue;
+      add({ key: d.assetnum, rule: 'DQ-01', record: `${keep.assetnum} / ${d.assetnum}`, object: 'Serial object', site: keep.siteid, severity: 'warning', reason: `${keep.assetnum} and ${d.assetnum} describe the same ${label(conceptOf(keep)).toLowerCase()} (${keep.manufacturer} ${keep.model} at ${keep.location}); decided with confidence ${v.confidence.toFixed(2)}.`, proposedFix: `Merge ${d.assetnum} into ${keep.assetnum} and re-point its work orders.` });
+    }
+  }
   const groups = new Map<string, SourceAsset[]>();
   for (const a of ds.assets) {
     if (!a.serialnum) continue;
     const k = [a.siteid, normSerial(a.serialnum), a.manufacturer, a.model].join('|');
     groups.set(k, [...(groups.get(k) ?? []), a]);
   }
-  for (const g of groups.values()) {
+  for (const g of dec.pairs?.size ? [] : groups.values()) {
     if (g.length < 2) continue;
     const [keep, ...dups] = [...g].sort((x, y) => x.assetnum.length - y.assetnum.length || x.assetnum.localeCompare(y.assetnum));
     for (const d of dups) add({ key: d.assetnum, rule: 'DQ-01', record: `${keep.assetnum} / ${d.assetnum}`, object: 'Serial object', site: keep.siteid, severity: 'warning', reason: `${keep.assetnum} and ${d.assetnum} share serial number ${normSerial(keep.serialnum)}, manufacturer ${keep.manufacturer} and model at ${keep.siteid}.`, proposedFix: `Merge ${d.assetnum} into ${keep.assetnum} and re-point its work orders.` });
@@ -162,7 +184,9 @@ export function validate(ds: Dataset): ValidationFailure[] {
     if (w.description.length > 60) add({ key: w.wonum, rule: 'ST-02', record: w.wonum, object: 'Work order', site: w.siteid, severity: 'warning', reason: `The description of ${w.wonum} has ${w.description.length} characters; the IFS field allows 60.`, proposedFix: 'Move the overflow into the work order note (mapping M-046).' });
     if (w.assetnum && !assets.has(w.assetnum)) add({ key: w.wonum, rule: 'RF-01', record: w.wonum, object: 'Work order', site: w.siteid, severity: 'error', reason: `${w.wonum} points to asset ${w.assetnum}, which is not in the extract.`, proposedFix: `Link it to its work location ${w.location ?? ''} instead.` });
     const a = w.assetnum ? assets.get(w.assetnum) : undefined;
-    if (w.causecode === 'TAPCHG' && a && conceptOf(a) !== 'util:DistributionTransformer') add({ key: w.wonum, rule: 'SM-02', record: w.wonum, object: 'Work order', site: w.siteid, severity: 'warning', reason: `Cause "tap changer failure" on ${w.wonum} is not valid for a ${label(conceptOf(a)).toLowerCase()}; it only applies to transformers.`, proposedFix: 'Map to "mechanical failure – general" and keep the original code in the note.' });
+    const score = dec.causeScores?.get(w.wonum);
+    if (score && score.score <= 2) add({ key: w.wonum, rule: 'SM-02', record: w.wonum, object: 'Work order', site: w.siteid, severity: 'warning', reason: `Cause ${w.causecode} on ${w.wonum} scores ${score.score} of 5 for plausibility on a ${label(a && conceptOf(a)).toLowerCase()}.`, proposedFix: 'Map to "mechanical failure – general" and keep the original code in the note.' });
+    else if (!score && w.causecode === 'TAPCHG' && a && conceptOf(a) !== 'util:DistributionTransformer') add({ key: w.wonum, rule: 'SM-02', record: w.wonum, object: 'Work order', site: w.siteid, severity: 'warning', reason: `Cause "tap changer failure" on ${w.wonum} is not valid for a ${label(conceptOf(a)).toLowerCase()}; it only applies to transformers.`, proposedFix: 'Map to "mechanical failure – general" and keep the original code in the note.' });
   }
   for (const p of ds.pms) {
     if (p.frequnit === 'HOURS') add({ key: p.pmnum, rule: 'SM-04', record: p.pmnum, object: 'PM action', site: p.siteid, severity: 'error', reason: `${p.pmnum} runs every ${p.frequency.toLocaleString('en-GB')} HOURS as a calendar interval. Running hours are a meter trigger.`, proposedFix: 'Move it to a runtime meter trigger (mapping M-050).' });
@@ -179,7 +203,7 @@ export function validate(ds: Dataset): ValidationFailure[] {
 
 // ---------------- Remediation proposals ----------------
 
-export function proposeFixes(raw: Dataset, failures: ValidationFailure[]): FixProposal[] {
+export function proposeFixes(raw: Dataset, failures: ValidationFailure[], dec: DecisionInputs = {}): FixProposal[] {
   const out: FixProposal[] = [];
   const assets = new Map(raw.assets.map((a) => [a.assetnum, a]));
   const by = (rule: string) => failures.filter((f) => f.rule === rule);
@@ -191,7 +215,7 @@ export function proposeFixes(raw: Dataset, failures: ValidationFailure[]): FixPr
     const woCount = raw.workOrders.filter((w) => w.assetnum === dup).length;
     out.push({
       id: `FX-D${pad(i + 1)}`, kind: 'merge_duplicate', rule: 'DQ-01', title: `Merge ${dup} into ${keep}`, detail: `${k.description} · ${k.manufacturer} ${k.model} · ${k.siteid}`,
-      records: [keep, dup], confidence: d.description.startsWith('OLD') ? 0.98 : d.status === 'NOT READY' ? 0.94 : 0.89,
+      records: [keep, dup], confidence: dec.pairs?.get(`${keep}|${dup}`)?.confidence ?? (d.description.startsWith('OLD') ? 0.98 : d.status === 'NOT READY' ? 0.94 : 0.89),
       evidence: ['Same serial number', 'Same manufacturer and model', d.location === k.location ? 'Same location' : 'Same site', ...(d.description.startsWith('OLD') ? ['Description prefixed "OLD -"'] : [])],
       status: 'proposed',
       diff: [{ field: 'SERIALNUM', from: d.serialnum ?? '', to: k.serialnum ?? '' }, { field: 'STATUS', from: d.status, to: k.status }, { field: 'Work orders', from: `${woCount} on ${dup}`, to: `re-pointed to ${keep}` }],
@@ -207,15 +231,19 @@ export function proposeFixes(raw: Dataset, failures: ValidationFailure[]): FixPr
     });
   });
   const byConcept = new Map<string, string[]>();
+  const confs = new Map<string, number[]>();
   for (const f of by('DQ-02')) {
-    const cid = inferConcept(assets.get(f.record)!);
+    const d = dec.classes?.get(f.record);
+    const cid = d?.concept ?? inferConcept(assets.get(f.record)!);
     if (cid) byConcept.set(cid, [...(byConcept.get(cid) ?? []), f.record]);
+    if (cid && d) confs.set(cid, [...(confs.get(cid) ?? []), d.confidence]);
   }
   [...byConcept.entries()].sort((a, b) => b[1].length - a[1].length).forEach(([cid, nums], i) => {
     out.push({
       id: `FX-C${pad(i + 1)}`, kind: 'classify', rule: 'DQ-02', title: `Classify ${nums.length} untyped asset${nums.length > 1 ? 's' : ''} as ${label(cid)}`,
-      detail: conceptById.get(cid)?.bindings.ifs ?? '', records: nums, confidence: Math.min(0.97, 0.8 + nums.length / 100), payload: { concept: cid },
-      evidence: ['Description matches concept synonyms', 'Attributes present match the class', 'Siblings at the same position share this class'], status: 'proposed',
+      detail: conceptById.get(cid)?.bindings.ifs ?? '', records: nums, payload: { concept: cid },
+      confidence: confs.get(cid)?.length ? Math.round((confs.get(cid)!.reduce((a, b) => a + b, 0) / confs.get(cid)!.length) * 100) / 100 : Math.min(0.97, 0.8 + nums.length / 100),
+      evidence: confs.get(cid)?.length ? ['Family, then class decided per asset', 'Description and attribute names', 'Parent and sibling classes'] : ['Description matches concept synonyms', 'Attributes present match the class', 'Siblings at the same position share this class'], status: 'proposed',
     });
   });
   for (const f of by('SM-03')) {

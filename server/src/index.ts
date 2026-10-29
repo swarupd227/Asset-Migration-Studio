@@ -18,8 +18,8 @@ import { randomBytes } from 'node:crypto';
 import { hierarchyIssues, hierarchyTree, rules } from './rules.js';
 import { reviewProgressNudge, runStage } from './agents/orchestrator.js';
 import { answer, liveModel, type ChatTurn } from './agents/assistant.js';
-import { decisionModelFor, runQuestion, thresholdsFor } from './decisions/flow.js';
-import { QUESTIONS } from './decisions/questions.js';
+import { decisionModelFor, decisionSetting, runQuestions, thresholdsFor } from './decisions/flow.js';
+import { QUESTIONS, RUN_ORDER } from './decisions/questions.js';
 import { decisionStats, getDecisions } from './store.js';
 import type { ModelDecision } from './types.js';
 import type { CodeRule, Mapping, Person, Question } from './types.js';
@@ -207,8 +207,19 @@ p.post('/extracts', express.text({ type: () => true, limit: '50mb' }), wrap(asyn
 // Decisions
 p.get('/decisions/questions', wrap(async (req, res) => {
   const pid = pidOf(req);
-  const [model, thresholds] = await Promise.all([decisionModelFor(pid), thresholdsFor(pid)]);
-  res.json({ questions: QUESTIONS.map(({ prompt, ...qq }) => (void prompt, qq)), model: model.name, reasoningModel: liveModel ? MODEL_LABEL : null, thresholds });
+  const [model, thresholds, setting] = await Promise.all([decisionModelFor(pid), thresholdsFor(pid), decisionSetting(pid)]);
+  const ordered = RUN_ORDER.map((id) => QUESTIONS.find((x) => x.id === id)!);
+  res.json({ questions: ordered.map(({ prompt, ...qq }) => (void prompt, qq)), model: model?.name ?? 'off', setting, reasoningModel: liveModel && setting === 'auto' ? MODEL_LABEL : null, thresholds });
+}));
+p.post('/decisions/settings', wrap(async (req, res) => {
+  const pid = pidOf(req);
+  const body = parse(z.object({ model: z.enum(['auto', 'local', 'off']), actor: z.string() }), req.body);
+  const actor = await actorOf(req);
+  if (actor.role !== 'Migration lead') throw new HttpError(403, 'Only the migration lead changes the decision model');
+  await q('UPDATE projects SET decision_model = $2 WHERE id = $1', [pid, body.model]);
+  await audit(pid, actor.name, 'user', 'decision.settings', body.model, { auto: 'Decision model and reasoning model', local: 'In-environment model only', off: 'Rules and people only' }[body.model]);
+  await touch(pid);
+  res.json({ ok: true, model: body.model });
 }));
 p.get('/decisions/stats', wrap(async (req, res) => res.json(await decisionStats(pidOf(req)))));
 p.get('/decisions', wrap(async (req, res) => {
@@ -221,10 +232,11 @@ p.post('/decisions/run', wrap(async (req, res) => {
   const body = parse(z.object({ question: z.string(), actor: z.string() }), req.body);
   const actor = await actorOf(req);
   if (!['Migration lead', 'Data subject expert'].includes(actor.role)) throw new HttpError(403, 'Migration leads and data subject experts run decision batches');
-  if (!QUESTIONS.some((x) => x.id === body.question)) throw new HttpError(404, 'Unknown question');
+  const ids = body.question === 'all' ? RUN_ORDER : [body.question];
+  if (!ids.every((id) => QUESTIONS.some((x) => x.id === id))) throw new HttpError(404, 'Unknown question');
   if (running.has(pid)) throw new HttpError(409, 'A decision batch is already running');
   running.add(pid);
-  runQuestion(pid, body.question, actor.name)
+  runQuestions(pid, ids, actor.name)
     .catch((e) => emitAgent(pid, { agent: 'decision-model', kind: 'error', text: String(e?.message ?? e) }))
     .finally(() => { running.delete(pid); touch(pid); });
   res.status(202).json({ ok: true });
