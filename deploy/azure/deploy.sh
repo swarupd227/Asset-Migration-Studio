@@ -17,7 +17,8 @@ TAG="${TAG:-v$(date +%Y%m%d%H%M)}"
 # Registry and Key Vault names must be globally unique: derive a short suffix from the subscription.
 SUFFIX="$(az account show --query id -o tsv | tr -d '-' | cut -c1-8)"
 ACR="${ACR:-acrams${SUFFIX}}"
-KV="${KV:-kv-ams-${SUFFIX}}"
+# "kvap" = a vault using access policies (no Azure role assignments needed to use it).
+KV="${KV:-kvap-ams-${SUFFIX}}"
 
 echo "Subscription: $(az account show --query name -o tsv)"
 echo "Deploying $APP to $RG in $LOCATION (registry $ACR, key vault $KV, image tag $TAG)"
@@ -56,7 +57,9 @@ fi
 # Uses vault access policies, so Key Vault needs no Azure role assignments.
 az keyvault show -n "$KV" -o none 2>/dev/null || az keyvault create -g "$RG" -n "$KV" -l "$LOCATION" --enable-rbac-authorization false -o none
 if [ "$(az keyvault show -n "$KV" --query properties.enableRbacAuthorization -o tsv)" = "true" ]; then
-  az keyvault update -n "$KV" --enable-rbac-authorization false -o none
+  # Changing the permission model needs role-assignment rights, so ask for a different vault instead.
+  echo "Key Vault $KV uses Azure RBAC, which needs role assignments. Re-run with another name, e.g. KV=kvap2-ams-${SUFFIX} bash deploy/azure/deploy.sh"
+  exit 1
 fi
 ME="$(az ad signed-in-user show --query id -o tsv)"
 az keyvault set-policy -n "$KV" --object-id "$ME" --secret-permissions get list set delete -o none
