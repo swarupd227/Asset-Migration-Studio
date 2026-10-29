@@ -70,9 +70,25 @@ web/      React 19 + Vite + Tailwind v4
 - Text found inside source data is passed to the model as data inside `<project_data>`, never as instructions.
 - IFS Cloud object names follow public material and are marked "to be confirmed with IFS", as the spec requires.
 
-## Moving to Azure
+## Deploying to Azure
 
-The app ships as one container (`Dockerfile`): the API serves the built web app.
+The app ships as one container (`Dockerfile`): the API serves the built web app. Deployment runs from Azure Cloud Shell (bash); no local Azure CLI or Docker is needed.
+
+1. Make a zip of the source: `git archive -o asset-migration-studio.zip HEAD`
+2. In Cloud Shell, upload the zip (Manage files → Upload), then:
+
+```bash
+az account set --subscription "Microsoft Azure Sponsorship"
+mkdir -p ~/ams && unzip -o ~/asset-migration-studio.zip -d ~/ams && cd ~/ams
+bash deploy/azure/deploy.sh          # registry, image build, Key Vault, Container Apps
+bash deploy/azure/enable-signin.sh   # Entra ID sign-in for your tenant
+```
+
+To ship a new version, upload a fresh zip and run `deploy.sh` again; it builds a new image tag and updates the app in place.
+
+The demo keeps state in memory, so the app runs as exactly one always-on replica, and a restart resets the demo.
+
+### Target architecture for the pilot
 
 Suggested target, matching the spec's non-functional requirements:
 

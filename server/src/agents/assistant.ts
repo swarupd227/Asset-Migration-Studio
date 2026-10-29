@@ -6,6 +6,8 @@ import type { Mapping } from '../types.js';
 // Review Assistant: explains evidence, answers questions and drafts decision notes. It cannot approve.
 // Uses Claude when credentials are configured, otherwise a grounded scripted fallback.
 
+// The Azure deployment stores "none" in Key Vault when no key is provided.
+if (process.env.ANTHROPIC_API_KEY === 'none') delete process.env.ANTHROPIC_API_KEY;
 export const liveModel = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
 const client = liveModel ? new Anthropic() : null;
 
