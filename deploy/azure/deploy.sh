@@ -39,26 +39,37 @@ az identity show -g "$RG" -n "$IDENTITY" -o none 2>/dev/null || az identity crea
 IDENTITY_ID="$(az identity show -g "$RG" -n "$IDENTITY" --query id -o tsv)"
 IDENTITY_PRINCIPAL="$(az identity show -g "$RG" -n "$IDENTITY" --query principalId -o tsv)"
 ACR_ID="$(az acr show -n "$ACR" --query id -o tsv)"
-az role assignment create --assignee-object-id "$IDENTITY_PRINCIPAL" --assignee-principal-type ServicePrincipal \
-  --role AcrPull --scope "$ACR_ID" -o none 2>/dev/null || true
+
+# Pull the image with the managed identity when we may create role assignments; otherwise fall back
+# to the registry's admin credentials (kept as a Container Apps secret).
+if az role assignment list --assignee "$IDENTITY_PRINCIPAL" --scope "$ACR_ID" --role AcrPull --query "[0].id" -o tsv 2>/dev/null | grep -q . \
+   || az role assignment create --assignee-object-id "$IDENTITY_PRINCIPAL" --assignee-principal-type ServicePrincipal --role AcrPull --scope "$ACR_ID" -o none; then
+  REGISTRY_ARGS=(--registry-server "${ACR}.azurecr.io" --registry-identity "$IDENTITY_ID")
+else
+  echo "Could not grant AcrPull (your account may not be allowed to create role assignments). Using registry admin credentials instead."
+  az acr update -n "$ACR" --admin-enabled true -o none
+  REGISTRY_ARGS=(--registry-server "${ACR}.azurecr.io" --registry-username "$ACR"
+    --registry-password "$(az acr credential show -n "$ACR" --query 'passwords[0].value' -o tsv)")
+fi
 
 # ---- Key Vault holding the Anthropic API key ----
-az keyvault show -n "$KV" -o none 2>/dev/null || az keyvault create -g "$RG" -n "$KV" -l "$LOCATION" --enable-rbac-authorization true -o none
-KV_ID="$(az keyvault show -n "$KV" --query id -o tsv)"
+# Uses vault access policies, so Key Vault needs no Azure role assignments.
+az keyvault show -n "$KV" -o none 2>/dev/null || az keyvault create -g "$RG" -n "$KV" -l "$LOCATION" --enable-rbac-authorization false -o none
+if [ "$(az keyvault show -n "$KV" --query properties.enableRbacAuthorization -o tsv)" = "true" ]; then
+  az keyvault update -n "$KV" --enable-rbac-authorization false -o none
+fi
 ME="$(az ad signed-in-user show --query id -o tsv)"
-az role assignment create --assignee-object-id "$ME" --assignee-principal-type User \
-  --role "Key Vault Secrets Officer" --scope "$KV_ID" -o none 2>/dev/null || true
-az role assignment create --assignee-object-id "$IDENTITY_PRINCIPAL" --assignee-principal-type ServicePrincipal \
-  --role "Key Vault Secrets User" --scope "$KV_ID" -o none 2>/dev/null || true
+az keyvault set-policy -n "$KV" --object-id "$ME" --secret-permissions get list set delete -o none
+az keyvault set-policy -n "$KV" --object-id "$IDENTITY_PRINCIPAL" --secret-permissions get -o none
 
 if ! az keyvault secret show --vault-name "$KV" -n anthropic-api-key -o none 2>/dev/null; then
   if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
     read -r -s -p "Anthropic API key (leave empty for the scripted assistant): " ANTHROPIC_API_KEY; echo
   fi
-  # Role assignments take a minute to apply, so retry the first write.
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    if az keyvault secret set --vault-name "$KV" -n anthropic-api-key --value "${ANTHROPIC_API_KEY:-none}" -o none 2>/dev/null; then break; fi
-    echo "Waiting for Key Vault permissions ($i/10)…"; sleep 15
+  for i in 1 2 3 4 5 6; do
+    if az keyvault secret set --vault-name "$KV" -n anthropic-api-key --value "${ANTHROPIC_API_KEY:-none}" -o none 2>/tmp/kv-error.txt; then break; fi
+    if [ "$i" = 6 ]; then echo "Could not write the Key Vault secret:"; cat /tmp/kv-error.txt; exit 1; fi
+    echo "Waiting for the Key Vault access policy ($i/6)..."; sleep 10
   done
 fi
 SECRET_URI="https://${KV}.vault.azure.net/secrets/anthropic-api-key"
@@ -77,9 +88,9 @@ IMAGE="${ACR}.azurecr.io/asset-migration-studio:${TAG}"
 if az containerapp show -g "$RG" -n "$APP" -o none 2>/dev/null; then
   az containerapp update -g "$RG" -n "$APP" --image "$IMAGE" -o none
 else
-  echo "Waiting 60s for the identity's registry and Key Vault roles to apply…"; sleep 60
+  echo "Waiting 60s for the identity's permissions to apply..."; sleep 60
   az containerapp create -g "$RG" -n "$APP" --environment "$ENV_NAME" \
-    --image "$IMAGE" --registry-server "${ACR}.azurecr.io" --registry-identity "$IDENTITY_ID" \
+    --image "$IMAGE" "${REGISTRY_ARGS[@]}" \
     --user-assigned "$IDENTITY_ID" \
     --secrets "anthropic-api-key=keyvaultref:${SECRET_URI},identityref:${IDENTITY_ID}" \
     --env-vars "ANTHROPIC_API_KEY=secretref:anthropic-api-key" "AMS_MODEL=claude-opus-5-5" "PORT=8080" \
