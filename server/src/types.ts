@@ -1,0 +1,375 @@
+// Shared domain types. The web app imports these as type-only imports (alias @shared/types).
+
+export type StageStatus = 'done' | 'running' | 'waiting' | 'ready' | 'locked';
+
+export interface Stage {
+  n: number;
+  key: string;
+  name: string;
+  summary: string;
+  agents: string[];
+  status: StageStatus;
+  previewEligible: boolean;
+  startedAt?: string;
+  finishedAt?: string;
+  metric?: string;
+}
+
+export interface AgentDef {
+  id: string;
+  name: string;
+  job: string;
+  guardrail: string;
+  icon: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  customer: string;
+  mode: 'delivery' | 'preview';
+  sourceSystems: string[];
+  target: string;
+  industryPack: string;
+  ontologyVersion: string;
+  region: string;
+  sharedLearning: boolean;
+  createdAt: string;
+  expiresAt?: string;
+  status: string;
+}
+
+export interface Site {
+  id: string;
+  name: string;
+  kind: 'water' | 'power';
+  region: string;
+}
+
+export interface SourceAsset {
+  assetnum: string;
+  description: string;
+  siteid: string;
+  location: string;
+  parent?: string;
+  classstructure?: string; // e.g. PUMP\CENTRIFUGAL; undefined for untyped
+  conceptId?: string; // ground-truth ontology concept (demo only)
+  manufacturer?: string;
+  model?: string;
+  serialnum?: string;
+  status: 'OPERATING' | 'NOT READY' | 'DECOMMISSIONED' | 'ACTIVE';
+  statusDate: string;
+  installDate: string;
+  criticality: number; // NV_CRITCODE 1..5
+  specs: Record<string, string | number>;
+}
+
+export interface SourceLocation {
+  location: string;
+  description: string;
+  siteid: string;
+  parent?: string;
+  type: 'SITE' | 'SYSTEM' | 'OPERATING' | 'POSITION';
+  conceptId: string;
+}
+
+export type MappingStatus =
+  | 'proposed'
+  | 'auto_accepted'
+  | 'approved'
+  | 'rejected'
+  | 'changed'
+  | 'not_migrated'
+  | 'question';
+
+export type ReviewPath = 'auto' | 'quick' | 'expert' | 'named';
+
+export type EvidenceType = 'metadata' | 'profile' | 'ontology' | 'code' | 'precedent' | 'reviewer';
+
+export interface Evidence {
+  type: EvidenceType;
+  content: string;
+  source: string;
+  weight: number; // contribution to confidence, 0..1
+}
+
+export interface Precedent {
+  id: string;
+  signature: string;
+  project: string; // anonymised, e.g. "Water utility · UK · 2025"
+  outcome: 'approved' | 'rejected' | 'changed';
+  count: number;
+  note: string;
+}
+
+export interface Alternative {
+  concept: string;
+  target: string;
+  confidence: number;
+  whyNot: string;
+}
+
+export type MappingKind =
+  | 'one_to_one'
+  | 'one_to_many'
+  | 'many_to_one'
+  | 'lookup'
+  | 'split'
+  | 'merge'
+  | 'derived'
+  | 'constant';
+
+export interface Mapping {
+  id: string;
+  object: string; // Maximo object, e.g. ASSET
+  sourceElements: string[]; // e.g. ["ASSET.SERIALNUM"]
+  conceptId: string;
+  conceptLabel: string;
+  target: string; // e.g. "EquipmentSerial.SerialNo"
+  targetNote?: string;
+  kind: MappingKind;
+  rule: string; // transformation rule, readable
+  confidence: number;
+  risk: 'low' | 'medium' | 'high';
+  safetyCritical: boolean;
+  regulatory: boolean;
+  path: ReviewPath;
+  status: MappingStatus;
+  sampled?: boolean; // part of the 10% sample of auto-accepted items
+  evidence: Evidence[];
+  precedents: Precedent[];
+  alternatives: Alternative[];
+  samples: { source: string; target: string }[];
+  agent: string;
+  custom?: boolean;
+  version: number;
+  reviewer?: string;
+  reviewNote?: string;
+  patternKey?: string; // items sharing an evidence pattern can be bulk-approved
+}
+
+export interface CodeRule {
+  id: string;
+  sourceFile: string;
+  language: string;
+  launchPoint: string;
+  ruleText: string;
+  fieldsTouched: string[];
+  confidence: number;
+  snippet: string;
+  highlight: [number, number]; // 1-based line range
+  impact: string;
+  status: 'proposed' | 'confirmed' | 'dismissed';
+}
+
+export interface CatalogueTable {
+  name: string;
+  description: string;
+  rows: number;
+  fields: CatalogueField[];
+  custom: boolean;
+  inScope: boolean;
+  ifsTarget?: string;
+}
+
+export interface CatalogueField {
+  name: string;
+  type: string;
+  length?: number;
+  description: string;
+  nullRate: number;
+  distinct: number;
+  topValues: { value: string; pct: number }[];
+  pattern?: string;
+  custom: boolean;
+  brokenRefs?: number;
+  touchedByRule?: string;
+}
+
+export interface Concept {
+  id: string;
+  label: string;
+  layer: 'L0' | 'L1' | 'L2' | 'L3';
+  parent?: string;
+  definition: string;
+  synonyms: string[];
+  attributes: { name: string; unit?: string; range?: string }[];
+  failureModes: string[];
+  allowedParents: string[];
+  neverUnder?: string[];
+  bindings: { maximo?: string; sap?: string; ifs?: string };
+  standard?: string;
+}
+
+export interface CodeListEntry {
+  ontology: string;
+  maximo: string;
+  sap: string;
+  ifs: string;
+  match: 'exact' | 'close' | 'broader' | 'unmatched';
+  count?: number;
+}
+
+export interface HierarchyNode {
+  id: string;
+  label: string;
+  kind: 'site' | 'functional' | 'serial';
+  conceptId?: string;
+  classLabel?: string;
+  source: string; // maximo object it came from
+  issues: string[]; // issue ids
+  children: HierarchyNode[];
+  childCount: number;
+}
+
+export interface HierarchyIssue {
+  id: string;
+  rule: string;
+  kind: 'wrong_parent' | 'orphan' | 'cycle' | 'untyped';
+  record: string;
+  site: string;
+  message: string;
+  proposedFix: string;
+  status: 'open' | 'fix_approved' | 'dismissed';
+}
+
+export interface Rule {
+  id: string;
+  level: 'Structural' | 'Reference' | 'Semantic' | 'Business' | 'Data quality';
+  text: string;
+  source: string;
+}
+
+export interface ValidationFailure {
+  id: string;
+  rule: string;
+  record: string;
+  object: string;
+  site: string;
+  reason: string; // plain language
+  proposedFix: string;
+  fixId?: string;
+  severity: 'error' | 'warning';
+}
+
+export interface FixProposal {
+  id: string;
+  kind: 'merge_duplicate' | 'reparent' | 'classify' | 'meter_correction' | 'archive' | 'code_map';
+  title: string;
+  detail: string;
+  records: string[];
+  confidence: number;
+  evidence: string[];
+  status: 'proposed' | 'approved' | 'rejected';
+  rule: string;
+  diff?: { field: string; from: string; to: string }[];
+}
+
+export interface LoadRun {
+  id: string;
+  number: number;
+  kind: 'dry_run' | 'production';
+  startedAt: string;
+  finishedAt?: string;
+  transformationVersion: string;
+  ontologyVersion: string;
+  status: 'running' | 'complete' | 'failed';
+  objects: { object: string; ifsTarget: string; source: number; loaded: number; failed: number }[];
+  validation: { rule: string; failures: number }[];
+  dqScore: number;
+  reconciliation?: ReconciliationCheck[];
+  errors: { record: string; object: string; ifsMessage: string }[];
+}
+
+export interface ReconciliationCheck {
+  id: string;
+  kind: 'count' | 'total' | 'hierarchy' | 'sample';
+  object: string;
+  check: string;
+  sourceValue: string;
+  targetValue: string;
+  outcome: 'pass' | 'fail' | 'explained';
+  note?: string;
+}
+
+export interface AuditEntry {
+  seq: number;
+  ts: string;
+  actor: string; // user name or agent id
+  actorKind: 'user' | 'agent' | 'system';
+  action: string;
+  target?: string;
+  detail?: string;
+  ontologyVersion?: string;
+  model?: string;
+  prevHash: string;
+  hash: string;
+}
+
+export interface AgentEvent {
+  id: string;
+  ts: string;
+  agent: string;
+  stage?: number;
+  kind: 'plan' | 'thought' | 'tool' | 'result' | 'handoff' | 'needs_human' | 'done' | 'error';
+  text: string;
+  tool?: string; // e.g. ontology.find_concept
+  args?: string;
+  ms?: number;
+}
+
+export interface Person {
+  id: string;
+  name: string;
+  role:
+    | 'Migration lead'
+    | 'Data subject expert'
+    | 'IFS solution consultant'
+    | 'Customer data owner'
+    | 'Ontology curator'
+    | 'Sales engineer';
+  org: string;
+  initials: string;
+  canApprove: string;
+}
+
+export interface Question {
+  id: string;
+  item: string;
+  text: string;
+  assignedTo: string;
+  answer?: string;
+  options?: string[];
+  status: 'open' | 'answered';
+}
+
+export interface DqSnapshot {
+  overallBefore: number;
+  overallAfter: number;
+  byObject: { object: string; before: number; after: number; records: number }[];
+  bySite: { site: string; before: number; after: number }[];
+}
+
+export interface Dashboard {
+  project: Project;
+  stages: Stage[];
+  kpis: {
+    sourceElements: number;
+    mapped: number;
+    notMigrated: number;
+    openQuestions: number;
+    autoAccepted: number;
+    quickReview: number;
+    expertReview: number;
+    namedReview: number;
+    pendingReview: number;
+    precedentShare: number;
+    dqBefore: number;
+    dqAfter: number;
+    assets: number;
+    workOrders: number;
+    hiddenRules: number;
+    fixesPending: number;
+  };
+  needsYou: { id: string; title: string; detail: string; href: string; role: string; severity: 'high' | 'medium' | 'low' }[];
+}

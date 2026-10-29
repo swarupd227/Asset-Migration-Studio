@@ -1,0 +1,19 @@
+{
+  "name": "asset-migration-studio",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Asset Migration Studio - agentic Maximo/SAP to IFS Cloud migration (concept demo)",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
+    "build": "npm run build -w web && npm run build -w server",
+    "start": "npm run start -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.6"
+  }
+}

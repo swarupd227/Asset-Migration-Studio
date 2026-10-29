@@ -1,0 +1,260 @@
+import type { Person, Site, SourceAsset, SourceLocation } from '../types.js';
+
+// Deterministic synthetic data shaped like a Maximo 7.6 extract for a fictional utility.
+// Every run produces the same data, so the demo is repeatable.
+
+export function rng(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const r = rng(20261028);
+const pick = <T,>(xs: readonly T[]) => xs[Math.floor(r() * xs.length)];
+const int = (lo: number, hi: number) => lo + Math.floor(r() * (hi - lo + 1));
+const pad = (n: number, w = 4) => String(n).padStart(w, '0');
+const date = (y0: number, y1: number) => {
+  const y = int(y0, y1), m = int(1, 12), d = int(1, 28);
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+};
+
+export const sites: Site[] = [
+  { id: 'NORTH', name: 'North Water Treatment Works', kind: 'water', region: 'North' },
+  { id: 'RIVR', name: 'Riverside Pumping', kind: 'water', region: 'Central' },
+  { id: 'LAKE', name: 'Lakeside Reservoir', kind: 'water', region: 'West' },
+  { id: 'HARB', name: 'Harbor Substation', kind: 'power', region: 'South' },
+  { id: 'EAST', name: 'Eastfield Substation', kind: 'power', region: 'East' },
+];
+
+export const people: Person[] = [
+  { id: 'u-maya', name: 'Maya Okafor', role: 'Migration lead', org: 'Artizent', initials: 'MO', canApprove: 'Stage completion' },
+  { id: 'u-dev', name: 'Dev Raman', role: 'Data subject expert', org: 'Artizent', initials: 'DR', canApprove: 'Mappings, code lists' },
+  { id: 'u-lena', name: 'Lena Svensson', role: 'IFS solution consultant', org: 'IFS partner', initials: 'LS', canApprove: 'Target design' },
+  { id: 'u-tom', name: 'Tom Hughes', role: 'Customer data owner', org: 'Northvale Water & Power', initials: 'TH', canApprove: 'Business rules, final sign-off' },
+  { id: 'u-ari', name: 'Ari Cohen', role: 'Ontology curator', org: 'Artizent', initials: 'AC', canApprove: 'Ontology changes' },
+  { id: 'u-sam', name: 'Sam Patel', role: 'Sales engineer', org: 'IFS partner', initials: 'SP', canApprove: 'None' },
+];
+
+const PUMP_MFR = [['Grundfos', 'NK 125-315'], ['KSB', 'Etanorm 150-400'], ['Xylem', 'Flygt NP 3171'], ['Sulzer', 'SMD 300']] as const;
+const MOTOR_MFR = [['ABB', 'M3BP 315'], ['WEG', 'W22 280'], ['Siemens', '1LE1 250']] as const;
+const VALVE_MFR = [['AVK', 'Series 06'], ['Emerson', 'Keystone 990'], ['Bray', 'S31']] as const;
+const INSTR_MFR = [['Endress+Hauser', 'Cerabar PMC51'], ['Yokogawa', 'EJA110E'], ['Siemens', 'SITRANS P320']] as const;
+const FLOW_MFR = [['Endress+Hauser', 'Promag W 400'], ['Krohne', 'Optiflux 2000']] as const;
+const TX_MFR = [['ABB', 'TXpand 1000'], ['Schneider', 'Minera MV'], ['Siemens', 'GEAFOL Basic']] as const;
+const CB_MFR = [['ABB', 'VD4 12kV'], ['Schneider', 'Evolis 24'], ['Eaton', 'W-VACi']] as const;
+const SWGR_MFR = [['Schneider', 'RM6'], ['ABB', 'SafeRing']] as const;
+
+export const locations: SourceLocation[] = [];
+export const assets: SourceAsset[] = [];
+
+let seq = 10000;
+const nextNum = (prefix: string) => `${prefix}-${seq++}`;
+const serial = (mfr: string) => `${mfr.slice(0, 2).toUpperCase().replace(/[^A-Z]/g, 'X')}${int(10, 99)}-${pad(int(0, 99999), 5)}`;
+
+function addAsset(a: Omit<SourceAsset, 'statusDate' | 'installDate' | 'status' | 'criticality'> & Partial<SourceAsset>) {
+  const full: SourceAsset = {
+    status: 'OPERATING',
+    installDate: date(1994, 2023),
+    statusDate: date(2019, 2026),
+    criticality: int(1, 5),
+    ...a,
+  } as SourceAsset;
+  assets.push(full);
+  return full;
+}
+
+function buildWaterSite(site: Site, systemsCount: number) {
+  locations.push({ location: site.id, description: site.name, siteid: site.id, type: 'SITE', conceptId: 'core:Site' });
+  const systemNames = ['Raw Water Intake', 'Pumping Station', 'Filtration', 'Chemical Dosing', 'Treated Water Pumping', 'Booster Station', 'Aeration'];
+  for (let s = 1; s <= systemsCount; s++) {
+    const sysName = systemNames[(s - 1) % systemNames.length];
+    const isPS = /Pump|Booster|Intake/.test(sysName);
+    const sysLoc = `${site.id}-${isPS ? 'PS' : 'SY'}${pad(s, 2)}`;
+    locations.push({ location: sysLoc, description: `${sysName} ${s}`, siteid: site.id, parent: site.id, type: isPS ? 'OPERATING' : 'SYSTEM', conceptId: isPS ? 'util:PumpingStation' : 'util:ProcessSystem' });
+    const positions = int(9, 13);
+    for (let p = 1; p <= positions; p++) {
+      const pos = `${sysLoc}-P${pad(p, 2)}`;
+      locations.push({ location: pos, description: `${sysName} ${s} position ${p}`, siteid: site.id, parent: sysLoc, type: 'POSITION', conceptId: 'core:FunctionalLocation' });
+      if (sysName === 'Chemical Dosing' && p <= 3) {
+        addAsset({ assetnum: nextNum('CL'), description: `Chlorinator ${p} ${site.id}`, siteid: site.id, location: pos, classstructure: 'CHEM\\CHLOR', conceptId: 'util:Chlorinator', manufacturer: 'Evoqua', model: 'V10K', serialnum: serial('Evoqua'), specs: { DOSERATE: int(20, 120) }, criticality: 5 });
+        continue;
+      }
+      if (sysName === 'Aeration' && p <= 4) {
+        const [m, mo] = pick(MOTOR_MFR);
+        const b = addAsset({ assetnum: nextNum('BL'), description: `Aeration blower ${p}`, siteid: site.id, location: pos, classstructure: 'BLOWER', conceptId: 'util:Blower', manufacturer: 'Aerzen', model: 'Delta Hybrid D62S', serialnum: serial('Aerzen'), specs: { RATEDFLOW: int(2000, 9000) } });
+        addAsset({ assetnum: nextNum('MO'), description: `Motor for ${b.description}`, siteid: site.id, location: pos, parent: b.assetnum, classstructure: 'MOTOR\\AC', conceptId: 'util:ElectricMotor', manufacturer: m, model: mo, serialnum: serial(m), specs: { RATEDPOWER: int(75, 250), VOLTAGE: 415 } });
+        continue;
+      }
+      // Standard pump set: pump, motor (child), suction and discharge valves, pressure instrument, sometimes a flow meter
+      const [pm, pmo] = pick(PUMP_MFR);
+      const pump = addAsset({
+        assetnum: nextNum('PU'), description: `${sysName} ${s} pump ${p}`, siteid: site.id, location: pos, classstructure: 'PUMP\\CENTRIFUGAL', conceptId: 'util:CentrifugalPump', manufacturer: pm, model: pmo, serialnum: serial(pm),
+        specs: { RATEDFLOW: int(80, 1400), RATEDHEAD: int(15, 90), RATEDPOWER: int(15, 400), SEALTYPE: pick(['Mechanical', 'Packed gland']), DRIVER: 'Electric motor' },
+      });
+      const [mm, mmo] = pick(MOTOR_MFR);
+      addAsset({ assetnum: nextNum('MO'), description: `Motor for pump ${pump.assetnum}`, siteid: site.id, location: pos, parent: pump.assetnum, classstructure: 'MOTOR\\AC', conceptId: 'util:ElectricMotor', manufacturer: mm, model: mmo, serialnum: serial(mm), specs: { RATEDPOWER: int(15, 400), VOLTAGE: pick([415, 690, 3300]), SPEED: pick([1480, 2960]) } });
+      for (const side of ['suction', 'discharge']) {
+        const [vm, vmo] = pick(VALVE_MFR);
+        addAsset({ assetnum: nextNum('VA'), description: `${side[0].toUpperCase() + side.slice(1)} valve pump ${pump.assetnum}`, siteid: site.id, location: pos, classstructure: pick(['VALVE\\GATE', 'VALVE\\BUTTERFLY']), conceptId: 'util:Valve', manufacturer: vm, model: vmo, serialnum: serial(vm), specs: { SIZE: pick([150, 200, 250, 300, 400]) } });
+      }
+      const [im, imo] = pick(INSTR_MFR);
+      addAsset({ assetnum: nextNum('PI'), description: `Discharge pressure transmitter ${pump.assetnum}`, siteid: site.id, location: pos, classstructure: 'INSTR\\PRESS', conceptId: 'util:Instrument', manufacturer: im, model: imo, serialnum: serial(im), specs: { RANGE: '0-16 bar' } });
+      if (r() < 0.35) {
+        const [fm, fmo] = pick(FLOW_MFR);
+        addAsset({ assetnum: nextNum('FM'), description: `Flow meter ${pos}`, siteid: site.id, location: pos, classstructure: 'INSTR\\FLOW', conceptId: 'util:FlowMeter', manufacturer: fm, model: fmo, serialnum: serial(fm), specs: { RANGE: `0-${int(5, 20) * 100} m3/h` } });
+      }
+    }
+  }
+}
+
+function buildPowerSite(site: Site, bays: number) {
+  locations.push({ location: site.id, description: site.name, siteid: site.id, type: 'SITE', conceptId: 'core:Site' });
+  for (let b = 1; b <= bays; b++) {
+    const bay = `${site.id}-BAY${pad(b, 2)}`;
+    locations.push({ location: bay, description: `${site.name} bay ${b}`, siteid: site.id, parent: site.id, type: 'OPERATING', conceptId: 'util:Substation' });
+    const feeders = int(5, 8);
+    for (let f = 1; f <= feeders; f++) {
+      const pos = `${bay}-F${pad(f, 2)}`;
+      locations.push({ location: pos, description: `Bay ${b} feeder ${f}`, siteid: site.id, parent: bay, type: 'POSITION', conceptId: 'core:FunctionalLocation' });
+      const [tm, tmo] = pick(TX_MFR);
+      addAsset({ assetnum: nextNum('TX'), description: `Distribution transformer bay ${b} feeder ${f}`, siteid: site.id, location: pos, classstructure: 'ELEC\\TRANSFORMER', conceptId: 'util:DistributionTransformer', manufacturer: tm, model: tmo, serialnum: serial(tm), specs: { RATINGKVA: pick([315, 500, 750, 1000, 1500]), PRIMARYKV: 11, COOLING: pick(['ONAN', 'ONAF']), OILVOL: int(300, 1200) } });
+      const [cm, cmo] = pick(CB_MFR);
+      addAsset({ assetnum: nextNum('CB'), description: `Circuit breaker bay ${b} feeder ${f}`, siteid: site.id, location: pos, classstructure: 'ELEC\\BREAKER', conceptId: 'util:CircuitBreaker', manufacturer: cm, model: cmo, serialnum: serial(cm), specs: { RATEDCURRENT: pick([630, 1250, 2000]), BREAKKA: pick([20, 25, 31.5]) } });
+      if (r() < 0.6) {
+        const [sm, smo] = pick(SWGR_MFR);
+        addAsset({ assetnum: nextNum('SG'), description: `Ring main unit bay ${b} feeder ${f}`, siteid: site.id, location: pos, classstructure: 'ELEC\\SWGR', conceptId: 'util:Switchgear', manufacturer: sm, model: smo, serialnum: serial(sm), specs: { RATEDKV: 11 } });
+      }
+      const [im, imo] = pick(INSTR_MFR);
+      addAsset({ assetnum: nextNum('PI'), description: `Protection relay CT bay ${b} feeder ${f}`, siteid: site.id, location: pos, classstructure: 'INSTR\\PRESS', conceptId: 'util:Instrument', manufacturer: im, model: imo, serialnum: serial(im), specs: {} });
+    }
+  }
+}
+
+buildWaterSite(sites[0], 7);
+buildWaterSite(sites[1], 6);
+buildWaterSite(sites[2], 5);
+buildPowerSite(sites[3], 9);
+buildPowerSite(sites[4], 8);
+
+// ---- Deliberate problems (as required by the concept demo scope) ----
+
+// 1. Untyped assets: classification missing on a set of assets (the Remediation Agent proposes a class).
+export const untypedAssets: string[] = [];
+for (const a of assets) {
+  if (untypedAssets.length < 64 && r() < 0.04 && a.conceptId !== 'util:Chlorinator') {
+    a.classstructure = undefined;
+    untypedAssets.push(a.assetnum);
+  }
+}
+
+// 2. Pumps placed under valves (wrong parent type; SM-01).
+export const pumpsUnderValves: { pump: string; valve: string }[] = [];
+{
+  const pumps = assets.filter((a) => a.conceptId === 'util:CentrifugalPump' && a.classstructure);
+  for (let i = 0; i < 7; i++) {
+    const pump = pumps[3 + i * 23];
+    const valve = assets.find((v) => v.conceptId === 'util:Valve' && v.location === pump.location);
+    if (valve) {
+      pump.parent = valve.assetnum;
+      pumpsUnderValves.push({ pump: pump.assetnum, valve: valve.assetnum });
+    }
+  }
+}
+
+// 3. Duplicate assets: same serial, manufacturer and model at the same site (DQ-01).
+export const duplicatePairs: { keep: string; dup: string; score: number; signals: string[] }[] = [];
+{
+  const candidates = assets.filter((a) => a.serialnum && a.classstructure && !a.parent);
+  for (let i = 0; i < 18; i++) {
+    const orig = candidates[11 + i * 37];
+    const dup = addAsset({
+      ...orig,
+      assetnum: `${orig.assetnum}A`,
+      description: orig.description.replace(/pump/i, 'Pump').replace(/^/, i % 3 === 0 ? 'OLD - ' : '') ,
+      status: i % 2 === 0 ? 'NOT READY' : 'OPERATING',
+      installDate: orig.installDate,
+      statusDate: date(2015, 2019),
+      specs: { ...orig.specs },
+    });
+    duplicatePairs.push({
+      keep: orig.assetnum,
+      dup: dup.assetnum,
+      score: Math.round((0.86 + r() * 0.13) * 100) / 100,
+      signals: ['Same serial number', 'Same manufacturer and model', 'Same site and location', i % 3 === 0 ? 'Description prefixed "OLD -"' : 'Created by data load 2017-03'],
+    });
+  }
+}
+
+// 4. Orphans: assets that reference a location that does not exist.
+export const orphanAssets: string[] = [];
+for (const idx of [140, 612, 1033, 1421]) {
+  const a = assets[idx];
+  a.location = `${a.siteid}-PS99-P01`;
+  orphanAssets.push(a.assetnum);
+}
+
+// 5. Decommissioned assets: more than two years ago are archived, not migrated (BR-02).
+export const decommissionedOld: string[] = [];
+for (const a of assets) {
+  if (decommissionedOld.length < 46 && r() < 0.025 && !a.parent) {
+    a.status = 'DECOMMISSIONED';
+    a.statusDate = date(2016, 2023);
+    decommissionedOld.push(a.assetnum);
+  }
+}
+
+// 6. A decreasing cumulative meter (SM-03).
+export const badMeter = (() => {
+  const pump = assets.find((a) => a.conceptId === 'util:CentrifugalPump' && a.siteid === 'RIVR' && !a.parent)!;
+  const readings = [
+    { date: '2025-11-03', value: 41210 },
+    { date: '2025-12-01', value: 41875 },
+    { date: '2026-01-05', value: 42690 },
+    { date: '2026-02-02', value: 4312 }, // decreasing: likely missing digit, or an unrecorded meter swap
+    { date: '2026-03-02', value: 43990 },
+    { date: '2026-04-06', value: 44702 },
+  ];
+  return { asset: pump.assetnum, meter: 'RUNHRS', readings };
+})();
+
+// ---- Work orders, PMs, meters (counts and samples) ----
+export const workOrderStats = {
+  closed: 15020,
+  open: 400,
+  byYear: [
+    { year: 2017, count: 1580 }, { year: 2018, count: 1622 }, { year: 2019, count: 1710 }, { year: 2020, count: 1544 },
+    { year: 2021, count: 1806 }, { year: 2022, count: 1888 }, { year: 2023, count: 1902 }, { year: 2024, count: 1611 }, { year: 2025, count: 1357 },
+  ],
+  inScopeClosed: 8068, // five years of closed history (BR-01)
+  pmPlans: 300,
+  meters: 1184,
+  readings: 58210,
+  failureCodes: 212,
+  spareParts: 3460,
+  crafts: 24,
+  documents: 5120,
+};
+
+export const sampleOpenWorkOrders = Array.from({ length: 12 }, (_, i) => {
+  const a = assets[50 + i * 97];
+  const status = ['APPR', 'INPRG', 'WAPPR', 'WSCH', 'NV-HOLD', 'APPR', 'FLDCOMP', 'INPRG', 'APPR', 'PEND-REG', 'WAPPR', 'APPR'][i];
+  return {
+    wonum: `WO-${pad(88120 + i * 7, 6)}`,
+    description: ['Replace mechanical seal', 'Investigate vibration alarm', 'Annual inspection', 'Calibrate transmitter', 'Oil sample and DGA', 'Valve exercise', 'Lubrication route', 'Repair actuator', 'Thermography survey', 'Breaker timing test', 'Replace gasket', 'Clean strainer'][i],
+    assetnum: a.assetnum,
+    siteid: a.siteid,
+    status,
+    worktype: pick(['PM', 'CM', 'EM']),
+    wopriority: int(1, 4),
+    reportdate: date(2026, 2026),
+  };
+});
+
+export function assetByNum(num: string) {
+  return assets.find((a) => a.assetnum === num);
+}
