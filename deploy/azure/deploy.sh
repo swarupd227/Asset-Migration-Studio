@@ -88,13 +88,22 @@ az containerapp env show -g "$RG" -n "$ENV_NAME" -o none 2>/dev/null || \
 
 # ---- Azure Database for PostgreSQL (Flexible Server) ----
 # The connection string, with a generated password, is kept only in Key Vault.
+PG_PASSWORD=""
 if ! az postgres flexible-server show -g "$RG" -n "$PG" -o none 2>/dev/null; then
   PG_PASSWORD="$(openssl rand -base64 30 | tr -dc 'A-Za-z0-9' | cut -c1-28)Aa1"
   echo "Creating PostgreSQL server $PG (takes 5-10 minutes)..."
   az postgres flexible-server create -g "$RG" -n "$PG" -l "$LOCATION" \
     --tier Burstable --sku-name Standard_B1ms --storage-size 32 --version 16 \
     --admin-user amsadmin --admin-password "$PG_PASSWORD" \
-    --public-access 0.0.0.0 --database-name ams --yes -o none
+    --public-access 0.0.0.0 --yes -o none
+elif ! az keyvault secret show --vault-name "$KV" -n database-url -o none 2>/dev/null; then
+  # Server exists but its connection string was never stored: set a new admin password.
+  PG_PASSWORD="$(openssl rand -base64 30 | tr -dc 'A-Za-z0-9' | cut -c1-28)Aa1"
+  az postgres flexible-server update -g "$RG" -n "$PG" --admin-password "$PG_PASSWORD" -o none
+fi
+az postgres flexible-server db show -g "$RG" -s "$PG" -d ams -o none 2>/dev/null || \
+  az postgres flexible-server db create -g "$RG" -s "$PG" -d ams -o none
+if [ -n "$PG_PASSWORD" ]; then
   az keyvault secret set --vault-name "$KV" -n database-url -o none \
     --value "postgres://amsadmin:${PG_PASSWORD}@${PG}.postgres.database.azure.com:5432/ams?sslmode=require"
 fi
