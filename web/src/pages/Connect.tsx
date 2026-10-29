@@ -19,8 +19,10 @@ function ExtractUpload({ region }: { region: string }) {
   const { data: extracts } = useApi<Extract[]>('/extracts');
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
+  // The customer data owner and the ontology curator review data; they do not load it.
+  const blocked = !persona || ['Customer data owner', 'Ontology curator'].includes(persona.role);
   const upload = async (files: FileList | File[]) => {
-    if (!persona) return;
+    if (!persona || blocked) return;
     setBusy(true);
     for (const f of Array.from(files)) {
       if (!ACCEPTED.test(f.name)) { await act(() => Promise.reject(new ApiError(400, `${f.name}: upload CSV, Excel (.xlsx) or Parquet files`))); continue; }
@@ -34,13 +36,15 @@ function ExtractUpload({ region }: { region: string }) {
   return (
     <Card>
       <CardHeader icon={FileSpreadsheet} title="Flat file extracts" subtitle="CSV, Excel or Parquet with a header row. One file per table (ASSET, LOCATIONS, WORKORDER, PM), or one workbook with a sheet per table." />
-      <label onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
+      <label onDragOver={(e) => { e.preventDefault(); if (!blocked) setOver(true); }} onDragLeave={() => setOver(false)}
         onDrop={(e) => { e.preventDefault(); setOver(false); if (e.dataTransfer.files.length) upload(e.dataTransfer.files); }}
-        className={cx('flex cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-8 text-center transition', over ? 'border-accent bg-accent-soft/50' : 'border-line-strong bg-surface-2 hover:border-accent hover:bg-accent-soft/40')}>
-        <UploadCloud className={cx('size-6', busy ? 'animate-bounce text-accent' : 'text-ink-3')} />
-        <span className="text-[13px] font-medium">{busy ? 'Uploading and profiling…' : 'Drop extract files or browse'}</span>
-        <span className="text-xs text-ink-3">Files stay in the project's isolated storage in {region}</span>
-        <input type="file" multiple accept=".csv,.txt,.xlsx,.parquet,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="sr-only" aria-label="Upload extract files" disabled={busy}
+        aria-disabled={blocked}
+        className={cx('flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-6 py-8 text-center transition',
+          blocked ? 'cursor-not-allowed border-line bg-sunken/60 opacity-70' : over ? 'cursor-pointer border-accent bg-accent-soft/50' : 'cursor-pointer border-line-strong bg-surface-2 hover:border-accent hover:bg-accent-soft/40')}>
+        {blocked ? <Lock className="size-6 text-ink-4" /> : <UploadCloud className={cx('size-6', busy ? 'animate-bounce text-accent' : 'text-ink-3')} />}
+        <span className="text-[13px] font-medium">{blocked ? `${persona?.role ?? 'This role'} cannot upload extracts` : busy ? 'Uploading and profiling…' : 'Drop extract files or browse'}</span>
+        <span className="text-xs text-ink-3">{blocked ? 'A migration lead or data subject expert loads source extracts.' : `Files stay in the project's isolated storage in ${region}`}</span>
+        <input type="file" multiple accept=".csv,.txt,.xlsx,.parquet,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="sr-only" aria-label="Upload extract files" disabled={busy || blocked}
           onChange={(e) => { if (e.target.files?.length) upload(e.target.files); e.target.value = ''; }} />
       </label>
       {!!extracts?.length && (
