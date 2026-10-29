@@ -11,7 +11,7 @@ import {
   getProject, getQuestions, getRuns, getSignoffs, getStages, getUser, insertRecords, listProjects, listUsers, loadDataset, MODEL_LABEL, projectState, putItem,
   putItems, quality, recentEvents, runSignable, setStage, touch, verifyAudit,
 } from './store.js';
-import { concepts, ontologyChangeLog, standards, woStatusCodeList, ONTOLOGY_VERSION, INDUSTRY_PACK } from './data/ontology.js';
+import { concepts, ONTOLOGY_VERSION, INDUSTRY_PACK } from './data/ontology.js';
 import { workOrderStats } from './data/seed.js';
 import { catalogueEntry, impliedSites, parseCsv, tableFromFilename, toRecords } from './extracts.js';
 import { randomBytes } from 'node:crypto';
@@ -34,6 +34,7 @@ import { activeJob, enqueue, handle, JobConflict, listJobs, onJobFailed, startWo
 import { budgetReached, monthSpend, usageSummary } from './usage.js';
 import { MIN_EXAMPLES, labels, trainable, trainedModels, trainProject } from './decisions/trained.js';
 import { localDecisionModel } from './decisions/adapters/local.js';
+import { ontologyRouter } from './ontology/routes.js';
 
 const app = express();
 const production = process.env.NODE_ENV === 'production';
@@ -135,18 +136,7 @@ app.post('/api/projects', wrap(async (req, res) => {
   res.status(201).json(await createProject(input, actor));
 }));
 
-app.get('/api/ontology', wrap(async (_req, res) => {
-  const proposals = (await q<{ data: object; status: string }>('SELECT data, status FROM ontology_proposals ORDER BY id')).map((r) => ({ ...r.data, status: r.status }));
-  res.json({ version: ONTOLOGY_VERSION, pack: INDUSTRY_PACK, concepts, codeList: woStatusCodeList, standards, changeLog: ontologyChangeLog, proposals });
-}));
-app.post('/api/ontology/proposals/:id', wrap(async (req, res) => {
-  const actor = await actorOf(req);
-  if (actor.role !== 'Ontology curator') throw new HttpError(403, 'Only the ontology curator can accept ontology proposals');
-  const status = req.body.decision === 'reject' ? 'rejected' : 'accepted';
-  const row = await one<{ data: object }>('UPDATE ontology_proposals SET status = $2 WHERE id = $1 RETURNING data', [req.params.id, status]);
-  if (!row) throw new HttpError(404, 'Not found');
-  res.json({ ...row.data, status });
-}));
+app.use('/api/ontology', ontologyRouter);
 
 // Evaluation harness: golden-dataset runs and the release gate.
 app.get('/api/evals', wrap(async (_req, res) => {

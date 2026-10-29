@@ -247,6 +247,93 @@ export interface Concept {
   neverUnder?: string[];
   bindings: { maximo?: string; sap?: string; ifs?: string };
   standard?: string;
+  /** Browsing group, such as "Electrical network". */
+  category?: string;
+  /** Characteristics with datatype and unit; includes `attributes`. */
+  properties?: ConceptProperty[];
+  /** Typed relationships, outgoing and derived inverse, including isA from `parent`. */
+  relations?: ConceptRelation[];
+}
+
+// ---------------- Ontology relationships, properties and enhancement ----------------
+
+export type RelationType =
+  | 'isA' | 'hasSubtype' | 'partOf' | 'hasPart' | 'locatedIn' | 'contains' | 'drives' | 'drivenBy' | 'feeds' | 'fedBy'
+  | 'protects' | 'protectedBy' | 'measures' | 'measuredBy' | 'controls' | 'controlledBy' | 'monitors' | 'monitoredBy'
+  | 'maintains' | 'maintainedBy' | 'supports' | 'supportedBy' | 'requires' | 'requiredBy' | 'describes' | 'describedBy' | 'connectedTo';
+export type Cardinality = '1' | '0..1' | '0..*' | '1..*';
+
+export interface RelationTypeDef {
+  id: RelationType;
+  label: string;
+  inverse: RelationType;
+  definition: string;
+  standard?: string;
+}
+
+export interface ConceptProperty {
+  name: string;
+  datatype: 'number' | 'text' | 'code' | 'date' | 'boolean';
+  unit?: string;
+  range?: string;
+  definition?: string;
+  /** 'extension' when added through an accepted ontology proposal. */
+  origin?: 'release' | 'extension';
+}
+
+export interface ConceptRelation {
+  type: RelationType;
+  target: string;
+  cardinality?: Cardinality;
+  note?: string;
+  /** True when computed from the inverse side or from `parent`. */
+  derived?: boolean;
+  origin?: 'release' | 'extension';
+}
+
+export type EnhancementKind = 'synonym' | 'property' | 'failureMode' | 'relation';
+export type EnhancementSource = 'model' | 'in-environment';
+
+export interface EnhancementItem {
+  key: string;
+  kind: EnhancementKind;
+  /** Synonym or failure mode text. */
+  value?: string;
+  /** Source system a synonym comes from. */
+  system?: 'general' | 'maximo' | 'sap' | 'ifs';
+  property?: ConceptProperty;
+  relation?: { type: RelationType; target: string; cardinality?: Cardinality };
+  rationale: string;
+}
+
+export interface EnhancementSuggestion {
+  conceptId: string;
+  source: EnhancementSource;
+  model?: string;
+  summary: string;
+  basis: string;
+  items: EnhancementItem[];
+  /** Items the model proposed that were dropped by validation, such as unknown concept ids. */
+  dropped: number;
+  generatedAt: string;
+}
+
+export interface OntologyProposalRecord {
+  id: string;
+  change: string;
+  reason: string;
+  source: string;
+  status: 'proposed' | 'accepted' | 'rejected';
+  conceptId?: string;
+  kind?: EnhancementKind;
+  item?: EnhancementItem;
+  origin?: EnhancementSource;
+  model?: string;
+  proposedBy?: string;
+  proposedAt?: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  version?: string;
 }
 
 export interface CodeListEntry {

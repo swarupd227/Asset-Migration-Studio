@@ -151,6 +151,12 @@ CREATE TABLE IF NOT EXISTS trained_models (
   active BOOLEAN NOT NULL, data JSONB NOT NULL, trained_by TEXT NOT NULL, trained_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (project_id, question_id, version)
 );
+-- Accepted ontology proposals that extend the served ontology, one row per change, with its version.
+CREATE TABLE IF NOT EXISTS ontology_extensions (
+  id TEXT PRIMARY KEY, proposal_id TEXT NOT NULL, concept_id TEXT, kind TEXT NOT NULL, data JSONB NOT NULL,
+  version TEXT NOT NULL, change TEXT NOT NULL, reason TEXT NOT NULL, source TEXT NOT NULL,
+  accepted_by TEXT NOT NULL, accepted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS audit_log (
   project_id TEXT NOT NULL, seq INT NOT NULL, ts TIMESTAMPTZ NOT NULL, actor TEXT NOT NULL, actor_kind TEXT NOT NULL,
   action TEXT NOT NULL, target TEXT, detail TEXT, ontology_version TEXT, model TEXT, prev_hash TEXT NOT NULL, hash TEXT NOT NULL,
