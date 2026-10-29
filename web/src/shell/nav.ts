@@ -1,12 +1,15 @@
 import {
-  Bot, BookOpenText, Gauge, Library, BrainCircuit, CheckCheck, FileCheck2, GitFork, Inbox, LayoutDashboard, Network, PlugZap, ScanSearch, ScrollText, ShieldAlert, Sparkle,
+  Bot, BookOpenText, FolderKanban, Gauge, Library, BrainCircuit, CheckCheck, FileCheck2, GitFork, Inbox, LayoutDashboard, Network, PlugZap, ScanSearch, ScrollText, ShieldAlert, Sparkle,
   type LucideIcon,
 } from 'lucide-react';
 
 export interface NavItem { to: string; label: string; icon: LucideIcon; hint: string; stage?: number; badge?: 'review' | 'quality' | 'validation' }
 
 export const navGroups: { label: string; items: NavItem[] }[] = [
-  { label: '', items: [{ to: '/', label: 'Mission control', icon: LayoutDashboard, hint: 'Pipeline, decisions waiting, live agents' }] },
+  { label: '', items: [
+    { to: '/', label: 'Mission control', icon: LayoutDashboard, hint: 'Pipeline, decisions waiting, live agents' },
+    { to: '/projects', label: 'Projects', icon: FolderKanban, hint: 'All projects; create a delivery project or a preview workspace' },
+  ] },
   {
     label: 'Understand',
     items: [
