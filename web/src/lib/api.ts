@@ -20,7 +20,7 @@ async function handle<T>(res: Response): Promise<T> {
 // Paths are project-scoped unless they belong to the platform itself.
 let projectId: string | null = null;
 export const setApiProject = (id: string | null) => { projectId = id; };
-const GLOBAL = /^\/(meta|projects$|projects\?|ontology|health|admin)/;
+const GLOBAL = /^\/(meta|projects$|projects\?|ontology|health|admin|evals)/;
 function url(path: string) {
   if (GLOBAL.test(path) || !projectId) return `/api${path}`;
   return `/api/projects/${encodeURIComponent(projectId)}${path}`;

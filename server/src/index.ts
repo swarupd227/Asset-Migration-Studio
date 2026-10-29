@@ -26,6 +26,8 @@ import { evaluateLater, evaluateTriggers } from './learning/engine.js';
 import { getSkill, matches, pinnedLibrary, projectSkills, saveSkill, skillUseCounts } from './learning/store.js';
 import { baseline, measureProjectSkills } from './learning/measure.js';
 import { toSkillMd } from './learning/format.js';
+import { datasets, limitsFor, listEvals, recordEval, RELEASE } from './evals/store.js';
+import { runEval } from './evals/run.js';
 import type { CodeRule, Mapping, Person, Question } from './types.js';
 
 const app = express();
@@ -141,6 +143,21 @@ app.post('/api/ontology/proposals/:id', wrap(async (req, res) => {
   res.json({ ...row.data, status });
 }));
 
+// Evaluation harness: golden-dataset runs and the release gate.
+app.get('/api/evals', wrap(async (_req, res) => {
+  res.json({ release: RELEASE, datasets, runs: await listEvals(), limits: limitsFor('Utilities') });
+}));
+let evalRunning = false;
+app.post('/api/evals/run', wrap(async (req, res) => {
+  const actor = await actorOf(req);
+  if (!['Ontology curator', 'Migration lead'].includes(actor.role)) throw new HttpError(403, 'The ontology curator or a migration lead runs evaluations');
+  const model = req.body.model === 'configured' ? 'configured' : 'local';
+  if (evalRunning) throw new HttpError(409, 'An evaluation is already running');
+  evalRunning = true;
+  runEval({ model }).then((r) => recordEval(r, actor.name)).catch((e) => console.error('Evaluation failed:', e)).finally(() => { evalRunning = false; });
+  res.status(202).json({ ok: true });
+}));
+
 // Live agent activity and change notifications for one project (works across replicas via LISTEN/NOTIFY).
 app.get('/api/stream', wrap(async (req, res) => {
   const pid = String(req.query.project ?? '');
@@ -217,9 +234,17 @@ p.get('/decisions/questions', wrap(async (req, res) => {
 }));
 p.post('/decisions/settings', wrap(async (req, res) => {
   const pid = pidOf(req);
-  const body = parse(z.object({ model: z.enum(['auto', 'local', 'off']), actor: z.string() }), req.body);
+  const body = parse(z.object({ model: z.enum(['auto', 'local', 'off']), actor: z.string(), thresholds: z.object({ auto: z.number(), human: z.number() }).optional() }), req.body);
   const actor = await actorOf(req);
   if (actor.role !== 'Migration lead') throw new HttpError(403, 'Only the migration lead changes the decision model');
+  if (body.thresholds) {
+    const lim = limitsFor((await getProject(pid))!.industryPack);
+    const t = body.thresholds;
+    if (t.auto < lim.auto[0] || t.auto > lim.auto[1] || t.human < lim.human[0] || t.human > lim.human[1] || t.human >= t.auto)
+      throw new HttpError(400, `Thresholds must stay within the curator limits: auto ${lim.auto.join('–')}, person ${lim.human.join('–')}`);
+    await q(`UPDATE projects SET decision_thresholds = decision_thresholds || $2::jsonb WHERE id = $1`, [pid, JSON.stringify(t)]);
+    await audit(pid, actor.name, 'user', 'decision.thresholds', `${t.auto} / ${t.human}`, 'Within curator limits');
+  }
   await q('UPDATE projects SET decision_model = $2 WHERE id = $1', [pid, body.model]);
   await audit(pid, actor.name, 'user', 'decision.settings', body.model, { auto: 'Decision model and reasoning model', local: 'In-environment model only', off: 'Rules and people only' }[body.model]);
   await touch(pid);

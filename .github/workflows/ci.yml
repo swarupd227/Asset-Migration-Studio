@@ -27,6 +27,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+      - name: Release gate on golden dataset GD-01
+        run: npm run eval -w server
       - run: npm run build
       - name: API starts against PostgreSQL
         env:

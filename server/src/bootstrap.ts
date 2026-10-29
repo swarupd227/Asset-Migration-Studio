@@ -6,6 +6,7 @@ import { assets, closedWorkOrders, locations, meters, people, pmPlans, workOrder
 import { buildMappings, catalogue, codeRules } from './data/catalog.js';
 import { proposeFixes, validate } from './rules.js';
 import { seedSharedLibrary } from './learning/library.js';
+import { ensureFirstEval } from './evals/store.js';
 import { addRun, audit, buildRun, getProject, insertRecords, loadDataset, putItems, setStage, STAGES } from './store.js';
 
 const ago = (mins: number) => new Date(Date.now() - mins * 60_000).toISOString();
@@ -137,6 +138,7 @@ export async function bootstrap() {
   if (!hasProjects?.n) await seedNorthvale();
   else await backfillClosedHistory();
   await seedSharedLibrary();
+  await ensureFirstEval();
 }
 
 /** Projects loaded before closed history was part of the Northvale extract get it added once. */

@@ -1,4 +1,9 @@
 import { useState } from 'react';
+import { useApi } from '@/lib/app';
+import { api } from '@/lib/api';
+import { timeAgo } from '@/lib/format';
+import { Button } from '@/components/ui';
+import { Play } from 'lucide-react';
 import { motion } from 'motion/react';
 import { Bot, CheckCircle2, Database, FlaskConical, ShieldCheck, Wrench, XCircle } from 'lucide-react';
 import { useApp } from '@/lib/app';
@@ -24,36 +29,27 @@ const tools: Record<string, string[]> = {
   steward: ['memory.write_tenant', 'ontology.propose'],
 };
 
-// Evaluation results per release on golden dataset GD-01.
-const metrics = [
-  { id: 'Binding precision', higher: true, r: [0.912, 0.934, 0.941] },
-  { id: 'Binding recall', higher: true, r: [0.874, 0.902, 0.909] },
-  { id: 'Code list accuracy', higher: true, r: [0.951, 0.963, 0.968] },
-  { id: 'Hierarchy accuracy', higher: true, r: [0.968, 0.977, 0.975] },
-  { id: 'Rule detection', higher: true, r: [0.89, 0.93, 0.94] },
-  { id: 'Calibration error', higher: false, r: [0.061, 0.043, 0.038] },
-  { id: 'Reviewer acceptance', higher: true, r: [0.81, 0.85, 0.87] },
-  { id: 'Hidden rule recall', higher: true, r: [0.78, 0.86, 0.88] },
-];
-const releases = [
-  { id: '1.0.0', note: 'IAO 2.3.0', date: 'Aug 2026' },
-  { id: '1.1.0', note: 'Precedent weighting · IAO 2.3.2', date: 'Sep 2026' },
-  { id: '1.2.0-rc', note: 'Release candidate · IAO 2.4.0', date: 'Oct 2026' },
-];
-const datasets = [
-  { name: 'GD-01 · Water utility', src: 'Maximo 7.6', size: '2,000 assets · 15k WOs', known: '41 known errors · 3 hidden rules' },
-  { name: 'GD-02 · Electric distribution', src: 'Maximo MAS Manage', size: '3,400 assets · 22k WOs', known: '57 known errors · 5 hidden rules' },
-  { name: 'GD-03 · Multi-utility', src: 'Maximo 7.6, heavily customised', size: '1,200 assets · 9k WOs', known: '33 known errors · 9 hidden rules' },
-];
-const calibration = [
-  { conf: 0.55, rate: 0.49, n: 38 }, { conf: 0.65, rate: 0.61, n: 54 }, { conf: 0.75, rate: 0.73, n: 97 }, { conf: 0.85, rate: 0.87, n: 162 }, { conf: 0.92, rate: 0.9, n: 211 }, { conf: 0.97, rate: 0.98, n: 305 },
-];
-
-function gate(i: number) {
-  if (i === 0) return { pass: true, why: 'First release' };
-  const drop = metrics.find((m) => (m.higher ? m.r[i] < m.r[i - 1] : m.r[i] > m.r[i - 1]));
-  return drop ? { pass: false, why: `${drop.id} dropped` } : { pass: true, why: 'No metric dropped' };
+interface EvalRun {
+  id: string; release: string; dataset: string; model: string; passed: boolean; startedBy: string; at: string;
+  gate: { regressions: { metric: string; baseline: number; now: number }[]; against: string };
+  result: { metrics: Record<string, number>; calibration: { conf: number; rate: number; n: number }[]; thresholdSuggestion: { auto: number; human: number; precisionAtAuto: number }; counts: Record<string, number>; ms: number };
 }
+interface Evals { release: string; datasets: { id: string; name: string; source: string; pack: string }[]; runs: EvalRun[]; limits: { auto: [number, number]; human: [number, number] } }
+
+const METRICS: { id: string; label: string; lower?: boolean }[] = [
+  { id: 'binding_precision', label: 'Binding precision (without memory)' },
+  { id: 'binding_recall', label: 'Binding recall (without memory)' },
+  { id: 'code_list_accuracy', label: 'Code list accuracy (automatic)' },
+  { id: 'code_list_coverage', label: 'Code list coverage' },
+  { id: 'hierarchy_accuracy', label: 'Hierarchy accuracy' },
+  { id: 'rule_detection', label: 'Rule detection' },
+  { id: 'failure_mode_accuracy', label: 'Failure mode accuracy (auto-accepted)' },
+  { id: 'failure_mode_coverage', label: 'Failure mode coverage' },
+  { id: 'calibration_error', label: 'Calibration error', lower: true },
+  { id: 'classification_accuracy', label: 'Classification accuracy' },
+  { id: 'duplicate_precision', label: 'Duplicate precision' },
+  { id: 'duplicate_recall', label: 'Duplicate recall' },
+];
 
 export default function Agents() {
   const { meta, activeAgents } = useApp();
@@ -64,7 +60,7 @@ export default function Agents() {
   return (
     <>
       <PageHeader
-        eyebrow={<><Bot className="size-3.5" /> {meta.agents.length} agents · {datasets.length} golden datasets</>}
+        eyebrow={<><Bot className="size-3.5" /> {meta.agents.length} agents</>}
         title="Agents & evaluation"
         description="Agent roles, tools and policies, with evaluation results per release."
         badges={<><Badge tone="agent">Model: {meta.model}</Badge><Badge tone="neutral">Ontology {meta.ontologyVersion}</Badge><Badge tone="neutral">Training on customer data: off</Badge></>}
@@ -108,61 +104,85 @@ export default function Agents() {
         </motion.div>
       </div>
 
-      <h2 className="mb-1 flex items-center gap-2 text-[15px] font-semibold"><FlaskConical className="size-4 text-agent" />Release gate</h2>
-      <p className="mb-4 max-w-3xl text-[13px] text-ink-2">A release ships only if <b className="text-ink">no metric drops below the previous release</b> on any golden dataset.</p>
+      <EvalSection />
+    </>
+  );
+}
+
+function EvalSection() {
+  const { persona, act, meta } = useApp();
+  const { data } = useApi<Evals>('/evals');
+  if (!data) return <Skeleton className="h-64" />;
+  const runs = [...data.runs].reverse().slice(-6);
+  const latest = data.runs[0];
+  const canRun = persona && ['Ontology curator', 'Migration lead'].includes(persona.role);
+  const run = (model: 'local' | 'configured') => persona && act(() => api.post('/evals/run', { model, actor: persona.id }), 'Evaluation started; results appear here when it finishes');
+  const fmt = (m: { lower?: boolean }, v?: number) => (v === undefined ? '—' : m.lower ? v.toFixed(3) : `${(v * 100).toFixed(1)}%`);
+  return (
+    <>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="flex items-center gap-2 text-[15px] font-semibold"><FlaskConical className="size-4 text-agent" />Release gate</h2>
+        <div className="flex gap-2">
+          <Button size="sm" icon={Play} disabled={!canRun} onClick={() => run('local')} title={canRun ? 'Runs in seconds, no model calls' : 'The ontology curator or a migration lead runs evaluations'}>Run with in-environment model</Button>
+          <Button size="sm" variant="agent" icon={Play} disabled={!canRun || !meta?.liveModel} onClick={() => run('configured')}>Run with configured models</Button>
+        </div>
+      </div>
+      <p className="mb-4 max-w-3xl text-[13px] text-ink-2">Release {data.release}. A release ships only if <b className="text-ink">no metric drops below the previous run</b> on any golden dataset. CI runs the gate with the in-environment model on every change.</p>
 
       <div className="mb-5 grid gap-3 md:grid-cols-3">
-        {datasets.map((d) => (
-          <Card key={d.name}>
-            <div className="flex items-center gap-2"><Database className="size-4 text-ink-3" /><span className="text-[13px] font-semibold">{d.name}</span></div>
-            <div className="mt-1.5 text-xs text-ink-3">{d.src}</div>
-            <div className="mt-2 flex flex-wrap gap-1.5"><Badge tone="neutral">{d.size}</Badge><Badge tone="agent">{d.known}</Badge></div>
+        {data.datasets.map((d) => (
+          <Card key={d.id}>
+            <div className="flex items-center gap-2"><Database className="size-4 text-ink-3" /><span className="text-[13px] font-semibold">{d.id} · {d.name}</span></div>
+            <div className="mt-1.5 text-xs text-ink-3">{d.source} · {d.pack} pack</div>
+            {latest && <div className="mt-2 flex flex-wrap gap-1.5"><Badge tone="neutral">{latest.result.counts.seededErrors} seeded errors</Badge><Badge tone="neutral">{latest.result.counts.failureModeRecords.toLocaleString('en-GB')} labelled work orders</Badge><Badge tone="agent">{latest.result.counts.untyped} untyped assets</Badge></div>}
           </Card>
         ))}
       </div>
 
-      <div className="grid gap-5 xl:grid-cols-[1.5fr_1fr]">
-        <Card pad={false} className="overflow-x-auto">
-          <table className="w-full text-[12.5px]">
-            <thead>
-              <tr className="border-b border-line text-left">
-                <th className="px-4 py-3 text-[11px] font-medium text-ink-3">Metric · GD-01</th>
-                {releases.map((r, i) => {
-                  const g = gate(i);
-                  return (
+      {runs.length === 0 ? <Card><p className="text-sm text-ink-3">No evaluation runs yet.</p></Card> : (
+        <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
+          <Card pad={false} className="overflow-x-auto">
+            <table className="w-full text-[12.5px]">
+              <thead>
+                <tr className="border-b border-line text-left">
+                  <th className="px-4 py-3 text-[11px] font-medium text-ink-3">Metric · GD-01</th>
+                  {runs.map((r) => (
                     <th key={r.id} className="px-3 py-3 text-right">
-                      <div className="text-[12.5px] font-semibold">{r.id}</div>
-                      <div className="text-[10.5px] font-normal text-ink-3">{r.date}</div>
-                      <div className={cx('mt-1 inline-flex items-center gap-1 text-[10.5px] font-medium', g.pass ? 'text-ok' : 'text-crit')}>
-                        {g.pass ? <CheckCircle2 className="size-3" /> : <XCircle className="size-3" />}{g.pass ? 'Gate passed' : 'Blocked'}
+                      <div className="text-[12px] font-semibold">{r.release}</div>
+                      <div className="text-[10.5px] font-normal text-ink-3">{r.model} · {timeAgo(r.at)}</div>
+                      <div className={cx('mt-1 inline-flex items-center gap-1 text-[10.5px] font-medium', r.passed ? 'text-ok' : 'text-crit')}>
+                        {r.passed ? <CheckCircle2 className="size-3" /> : <XCircle className="size-3" />}{r.passed ? 'Gate passed' : 'Blocked'}
                       </div>
                     </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {metrics.map((m) => (
-                <tr key={m.id} className="border-b border-line last:border-0">
-                  <td className="px-4 py-2">{m.id}{!m.higher && <span className="ml-1 text-[10.5px] text-ink-4">(lower is better)</span>}</td>
-                  {m.r.map((v, i) => {
-                    const worse = i > 0 && (m.higher ? v < m.r[i - 1] : v > m.r[i - 1]);
-                    return <td key={i} className={cx('px-3 py-2 text-right font-mono tabular', worse ? 'font-semibold text-crit' : i === m.r.length - 1 ? 'text-ink' : 'text-ink-3')}>{m.higher ? `${(v * 100).toFixed(1)}%` : v.toFixed(3)}</td>;
-                  })}
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="border-t border-line px-4 py-2 text-[11.5px] text-ink-3">
-            {(() => { const g = gate(2); return g.pass ? 'Release candidate 1.2.0 can ship.' : `Release candidate 1.2.0 is blocked: ${g.why} on GD-01. `; })()}
-          </div>
-        </Card>
-        <Card>
-          <CardHeader title="Calibration" subtitle="Confidence vs. reviewer approval rate" right={<Segmented size="sm" value="gd" onChange={() => {}} options={[{ id: 'gd', label: 'Golden + project history' }]} />} />
-          <CalibrationChart points={calibration} />
-          <p className="mt-2 text-xs text-ink-3">Calibration error {metrics[5].r[2].toFixed(3)} on release 1.2.0-rc · review thresholds 0.75 / 0.95.</p>
-        </Card>
-      </div>
+              </thead>
+              <tbody>
+                {METRICS.map((m) => (
+                  <tr key={m.id} className="border-b border-line last:border-0">
+                    <td className="px-4 py-2">{m.label}{m.lower && <span className="ml-1 text-[10.5px] text-ink-4">(lower is better)</span>}</td>
+                    {runs.map((r) => {
+                      const bad = r.gate.regressions.some((x) => x.metric === m.id);
+                      return <td key={r.id} className={cx('px-3 py-2 text-right font-mono tabular', bad ? 'font-semibold text-crit' : 'text-ink-2')}>{fmt(m, r.result.metrics[m.id])}</td>;
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="border-t border-line px-4 py-2 text-[11.5px] text-ink-3">
+              {latest.passed ? `Latest run passed the gate (compared with the ${latest.gate.against}).` : `Latest run is blocked: ${latest.gate.regressions.map((x) => `${x.metric} ${x.now} < ${x.baseline}`).join(', ')}.`}
+            </div>
+          </Card>
+          <Card>
+            <CardHeader title="Calibration" subtitle={`Failure-mode confidence vs. correct answers · ${latest.model}`} />
+            <CalibrationChart points={latest.result.calibration} />
+            <p className="mt-2 text-xs text-ink-3">
+              Calibration error {latest.result.metrics.calibration_error.toFixed(3)}. Suggested auto-accept threshold {latest.result.thresholdSuggestion.auto} (accepted answers {Math.round(latest.result.thresholdSuggestion.precisionAtAuto * 100)}% correct).
+              Curator limits for the utilities pack: auto {data.limits.auto.join('–')}, person {data.limits.human.join('–')}.
+            </p>
+          </Card>
+        </div>
+      )}
     </>
   );
 }

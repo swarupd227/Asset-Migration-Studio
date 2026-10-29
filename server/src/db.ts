@@ -122,6 +122,11 @@ CREATE TABLE IF NOT EXISTS skill_uses (
 );
 CREATE INDEX IF NOT EXISTS skill_uses_by_skill ON skill_uses (project_id, skill_id);
 ALTER TABLE projects ADD COLUMN IF NOT EXISTS skill_library_version TEXT;
+-- Evaluation runs on golden datasets; a release is gated on them.
+CREATE TABLE IF NOT EXISTS eval_runs (
+  id TEXT PRIMARY KEY, release TEXT NOT NULL, dataset TEXT NOT NULL, model TEXT NOT NULL, passed BOOLEAN NOT NULL,
+  result JSONB NOT NULL, gate JSONB NOT NULL, started_by TEXT NOT NULL, at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS audit_log (
   project_id TEXT NOT NULL, seq INT NOT NULL, ts TIMESTAMPTZ NOT NULL, actor TEXT NOT NULL, actor_kind TEXT NOT NULL,
   action TEXT NOT NULL, target TEXT, detail TEXT, ontology_version TEXT, model TEXT, prev_hash TEXT NOT NULL, hash TEXT NOT NULL,

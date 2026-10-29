@@ -1,0 +1,19 @@
+{
+  "model": "local-rules",
+  "dataset": "GD-01",
+  "ontologyVersion": "IAO 2.4.0",
+  "metrics": {
+    "binding_precision": 0.7895,
+    "binding_recall": 0.3261,
+    "code_list_accuracy": 1,
+    "code_list_coverage": 0.6667,
+    "hierarchy_accuracy": 1,
+    "rule_detection": 1,
+    "failure_mode_accuracy": 1,
+    "failure_mode_coverage": 0.8966,
+    "calibration_error": 0.1333,
+    "classification_accuracy": 0.9286,
+    "duplicate_precision": 1,
+    "duplicate_recall": 1
+  }
+}
